@@ -26,6 +26,20 @@ xcodebuild -scheme NBA -destination 'platform=macOS' build
 签名默认为 ad-hoc（模拟器 / 本机可直接跑）；要真机或上架，在 Xcode 的
 Signing & Capabilities 里选自己的 Team 即可。
 
+### 版本管理与回退
+
+```bash
+./Scripts/revert.sh snapshot "说明文字"   # 存一个可回退的版本点（改完随手存）
+./Scripts/revert.sh list                  # 列出所有版本点
+./Scripts/revert.sh show                  # 查看当前状态
+./Scripts/revert.sh diff v1               # 看与某个版本点的差异
+./Scripts/revert.sh back v1               # 回退到 v1（会自动存 recover 分支，可切回）
+./Scripts/revert.sh undo                  # 丢弃未提交的改动
+```
+
+回退时自动创建 `recover-MMDD-HHMM` 分支保存当前状态，`git checkout <分支名>` 即可切回来；
+切到版本点后跑一次 `./Scripts/build.sh` 就能得到对应的 `.app`。
+
 ### 一键编译出 .app
 
 ```bash
@@ -56,7 +70,8 @@ cd Packages/NBAKit && swift test
 ```
 NBA/
 ├── project.yml                    XcodeGen 工程定义（唯一需要手写的工程配置）
-├── Scripts/build.sh               一键编译出 .app（iOS 模拟器版 + macOS 版）
+├── Scripts/build.sh               一键编译出 macOS .app
+├── Scripts/revert.sh              版本管理：存版本点、回退、查看差异
 ├── AGENTS.md                      协作规则：改动后必编译、数据层改动必跑测试
 ├── NBA.xcodeproj                  xcodegen generate 产物，可安全删除重建
 ├── Assets.xcassets                AccentColor / AppIcon 占位

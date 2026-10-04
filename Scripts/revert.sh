@@ -96,7 +96,7 @@ back)
 
     RECOVER="recover-$(date +%m%d-%H%M)"
     git branch "$RECOVER"
-    ok "当前状态已存为分支 $RECOVER（随时 git checkout $RECOVER 切回来）"
+    ok "当前状态已存为分支 $RECOVER (随时 git checkout $RECOVER 切回来)"
 
     log "切到 $TARGET"
     if git checkout -q "$TARGET" 2>/dev/null; then
