@@ -37,15 +37,25 @@ case "${1:-show}" in
 snapshot)
     MSG="${2:-}"
     [ -n "$MSG" ] || die "请提供说明文字：./Scripts/revert.sh snapshot \"说明\""
-    dirty_check || die "请先处理未提交的改动（或先跑一次 snapshot 提交它们）"
 
-    git add -A
-    git commit -q -m "$MSG"
-    N=$(git rev-list --count HEAD)
-    TAG="${TAG_PREFIX}${N}-$(echo "$MSG" | tr ' ' '-' | cut -c1-30)"
+    # 有未提交改动时一并纳入快照（正常用法：改完随手存一个版本点）
+    if [ -n "$(git status --porcelain)" ]; then
+        log "将一并保存以下未提交改动："
+        git status --short | sed 's/^/    /'
+        git add -A
+        git commit -q -m "$MSG"
+    else
+        warn "代码没有变化，只记录一个版本点"
+    fi
+
+    # tag 用纯 ASCII 递增编号，方便命令行输入；中文说明放在 tag 注释里
+    N=$(git tag -l "${TAG_PREFIX}[0-9]*" | sed "s/${TAG_PREFIX}//" | grep -E '^[0-9]+$' | sort -n | tail -1)
+    N=${N:-0}
+    N=$((N + 1))
+    TAG="${TAG_PREFIX}${N}"
     git tag -a "$TAG" -m "$MSG"
-    ok "版本点 $TAG 已保存"
-    ok "回退命令：./Scripts/revert.sh back ${TAG_PREFIX}${N}"
+    ok "版本点 $TAG 已保存 — $MSG"
+    ok "回退命令：./Scripts/revert.sh back $TAG"
     ;;
 
 list)
