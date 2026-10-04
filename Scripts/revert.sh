@@ -49,7 +49,8 @@ snapshot)
     fi
 
     # tag 用纯 ASCII 递增编号，方便命令行输入；中文说明放在 tag 注释里
-    N=$(git tag -l "${TAG_PREFIX}[0-9]*" | sed "s/${TAG_PREFIX}//" | grep -E '^[0-9]+$' | sort -n | tail -1)
+    # grep 无匹配时退出码为 1，set -e/pipefail 下会让脚本中断，这里显式兜住
+    N=$(git tag -l "${TAG_PREFIX}[0-9]*" | sed "s/${TAG_PREFIX}//" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
     N=${N:-0}
     N=$((N + 1))
     TAG="${TAG_PREFIX}${N}"
