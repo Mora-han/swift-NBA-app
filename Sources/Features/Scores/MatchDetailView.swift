@@ -25,7 +25,11 @@ struct MatchDetailView: View {
                         TeamComparisonCard(stats: comparison)
                     }
                     if let box = model.boxscore {
-                        BoxscoreSection(boxscore: box)
+                        BoxscoreSection(boxscore: box,
+                                        awayTeamName: model.displayMatch.awayTeamName,
+                                        homeTeamName: model.displayMatch.homeTeamName,
+                                        awayTeamId: model.displayMatch.awayTeamId,
+                                        homeTeamId: model.displayMatch.homeTeamId)
                     }
                 } else {
                     UnavailableMatchNote(status: model.displayMatch.status,
@@ -180,9 +184,9 @@ private struct TeamComparisonCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "两队对比", subtitle: "左客队 / 右主队")
+            SectionHeader(title: "两队对比", subtitle: "上为客队，下为主队")
 
-            VStack(spacing: 6) {
+            VStack(spacing: 2) {
                 ForEach(stats.compares) { item in
                     CompareBar(item: item)
                 }
@@ -195,73 +199,138 @@ private struct TeamComparisonCard: View {
 private struct CompareBar: View {
     let item: StatCompare
 
-    /// 「49.0% (48-98)」这类长值：主数值单行，(命中-出手) 放次行，避免折行挤压
-    private func valueText(_ raw: String?) -> some View {
+    /// 拆出主数值与括号内的命中-出手
+    private func parts(_ raw: String?) -> (main: String, sub: String?) {
         let text = raw ?? "-"
-        let parts = text.split(separator: " ", maxSplits: 1).map(String.init)
-        return HStack(spacing: 3) {
-            Text(parts.first ?? "-")
-                .font(.statNumber(13, weight: .semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-            if parts.count > 1 {
-                Text(parts[1])
-                    .font(.statNumber(10))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-        }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-        .frame(minWidth: 44, alignment: .trailing)
+        let seg = text.split(separator: " ", maxSplits: 1).map(String.init)
+        return (seg.first ?? "-", seg.count > 1 ? seg[1] : nil)
     }
 
     var body: some View {
         let homeVal = item.homeVal ?? 0
         let awayVal = item.awayVal ?? 0
         let total = homeVal + awayVal
-        let homeRatio = total > 0 ? homeVal / total : 0.5
+        let awayRatio = total > 0 ? awayVal / total : 0.5
+        let away = parts(item.away?.raw)
+        let home = parts(item.home?.raw)
 
         VStack(spacing: 3) {
-            HStack(spacing: 6) {
+            // 客队：名字在左、数字在右
+            HStack(spacing: 8) {
                 Text(item.name ?? "")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Spacer(minLength: 8)
-                valueText(item.away?.raw)
-                valueText(item.home?.raw)
+                Spacer(minLength: 12)
+                if let sub = away.sub {
+                    Text(sub)
+                        .font(.statNumber(10))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                Text(away.main)
+                    .font(.statNumber(15, weight: .bold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(minWidth: 46, alignment: .trailing)
             }
 
+            // 条形：上段客队占比、下段主队占比
             GeometryReader { geo in
-                HStack(spacing: 2) {
+                let w = geo.size.width
+                let gap: CGFloat = 2
+                let segH = max(3, (geo.size.height - gap) / 2)
+                VStack(spacing: gap) {
                     Capsule()
-                        .fill(Color.accentColor.opacity(0.75))
-                        .frame(width: max(2, (geo.size.width - 2) * (1 - homeRatio)))
+                        .fill(Color.accentColor.opacity(0.85))
+                        .frame(width: max(4, w * awayRatio), height: segH)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Capsule()
-                        .fill(.quaternary)
-                        .frame(width: max(2, (geo.size.width - 2) * homeRatio))
+                        .fill(Color.accentColor.opacity(0.32))
+                        .frame(width: max(4, w * (1 - awayRatio)), height: segH)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
+                .frame(height: segH * 2 + gap)
             }
-            .frame(height: 5)
+            .frame(height: 10)
+
+            // 主队：数字在左
+            HStack(spacing: 8) {
+                Text(home.main)
+                    .font(.statNumber(15, weight: .bold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(minWidth: 46, alignment: .leading)
+                if let sub = home.sub {
+                    Text(sub)
+                        .font(.statNumber(10))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 12)
+            }
         }
     }
 }
 
 // MARK: - 球员技术统计（boxscore）
 
+/// 按主客队分栏展示，照片放大到能看清
 private struct BoxscoreSection: View {
     let boxscore: Boxscore
+    let awayTeamName: String?
+    let homeTeamName: String?
+    let awayTeamId: String?
+    let homeTeamId: String?
 
-    private static let headers = ["上场", "得分", "篮板", "助攻", "抢断", "盖帽", "命中率", "+/-"]
+    @State private var side: Side = .away
+
+    enum Side: Hashable { case away, home }
+
+    private var currentTeamName: String {
+        side == .away ? (awayTeamName ?? "客队") : (homeTeamName ?? "主队")
+    }
+
+    private var players: [BoxscoreEntry] {
+        boxscore.roster.filter { entry in
+            let tid = entry.stats?.teamId
+            switch side {
+            case .away: return tid == nil || tid == awayTeamId
+            case .home: return tid == nil || tid == homeTeamId
+            }
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "球员技术统计")
 
-            ForEach(boxscore.roster) { entry in
-                if let stats = entry.stats {
-                    playerBlock(stats: stats, tags: entry.tagInfoList ?? [])
+            // 主客队切换
+            Picker("", selection: $side) {
+                Text(awayTeamName ?? "客队").tag(Side.away)
+                Text(homeTeamName ?? "主队").tag(Side.home)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if players.isEmpty {
+                Text("\(currentTeamName) 暂无球员数据")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 16)
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(players.enumerated()), id: \.element.id) { index, entry in
+                        if let stats = entry.stats {
+                            playerRow(stats: stats, tags: entry.tagInfoList ?? [])
+                        }
+                        if index < players.count - 1 {
+                            Divider().padding(.leading, 68)
+                        }
+                    }
                 }
             }
 
@@ -274,12 +343,15 @@ private struct BoxscoreSection: View {
         .systemCard()
     }
 
-    private func playerBlock(stats: PlayerMatchStats, tags: [PlayerTag]) -> some View {
+    private func playerRow(stats: PlayerMatchStats, tags: [PlayerTag]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                RemoteImage(urlString: stats.logoUrl ?? stats.photo, width: 30, height: 30, cornerRadius: 6)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
+            HStack(spacing: 12) {
+                // 照片放大：30 -> 52，能看清球员
+                RemoteImage(urlString: stats.photo ?? stats.logoUrl,
+                            width: 52, height: 52, cornerRadius: 8, contentMode: .fill)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
                         if stats.isStarter {
                             Text("首发")
                                 .font(.system(size: 9, weight: .bold))
@@ -289,23 +361,37 @@ private struct BoxscoreSection: View {
                                 .background(Color.accentColor, in: .rect(cornerRadius: 3))
                         }
                         Text(stats.name ?? "")
-                            .font(.subheadline.weight(.medium))
+                            .font(.headline)
                             .lineLimit(1)
+                        if stats.isOnCourt {
+                            Image(systemName: "figure.basketball")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.live)
+                        }
                     }
+                    HStack(spacing: 5) {
+                        if let pos = stats.position, !pos.isEmpty {
+                            Text(pos)
+                        }
+                        Text("背号 \(stats.number ?? "-")")
+                        if let pm = stats.plusMinus?.raw, !pm.isEmpty, pm != "-" {
+                            Text("正负 \(pm)")
+                                .foregroundStyle(pm.hasPrefix("-")
+                                                 ? Theme.loss : Theme.win)
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
                     if !tags.isEmpty {
                         Text(tags.compactMap(\.text).joined(separator: " · "))
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
                 }
-                Spacer()
-                if stats.isOnCourt {
-                    Image(systemName: "figure.basketball")
-                        .font(.caption)
-                        .foregroundStyle(Theme.live)
-                        .symbolEffect(.pulse)
-                }
+                Spacer(minLength: 4)
             }
 
             if stats.didNotPlay {
@@ -315,18 +401,17 @@ private struct BoxscoreSection: View {
             } else {
                 HStack(spacing: 0) {
                     statCell("上场", stats.mins?.raw ?? "-")
-                    statCell("得分", stats.pts.map(String.init) ?? "-", highlight: (stats.pts ?? 0) >= 20)
+                    statCell("得分", stats.pts.map(String.init) ?? "-",
+                             highlight: (stats.pts ?? 0) >= 20)
                     statCell("篮板", stats.reb.map(String.init) ?? "-")
                     statCell("助攻", stats.asts.map(String.init) ?? "-")
                     statCell("抢断", stats.stl.map(String.init) ?? "-")
                     statCell("盖帽", stats.blk.map(String.init) ?? "-")
                     statCell("投篮", stats.fgp?.raw ?? "-")
-                    statCell("+/-", stats.plusMinus?.raw ?? "-")
                 }
             }
         }
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.vertical, 10)
     }
 
     private func statCell(_ title: String, _ value: String, highlight: Bool = false) -> some View {

@@ -1,7 +1,7 @@
 import SwiftUI
 import NBAKit
 
-/// 球队列表：东/西部分区，队徽取自 standings（含 teams.json 静态兜底），按当前战绩排序
+/// 球队列表：卡片网格 + 战绩信息（队徽取自 standings，含 teams.json 静态兜底）
 struct TeamsView: View {
     @State private var search = ""
     @State private var store = TeamLogoStore()
@@ -15,70 +15,111 @@ struct TeamsView: View {
     private var west: [LeagueTeam] { sorted(TeamRegistry.all.filter { TeamConference.all[$0.teamId] == "W" }) }
 
     private var filteredEast: [LeagueTeam] {
-        search.isEmpty ? east : east.filter { $0.name.contains(search) }
+        search.isEmpty ? east : east.filter { $0.name.contains(search) || ($0.abbr ?? "").contains(search) }
     }
 
     private var filteredWest: [LeagueTeam] {
-        search.isEmpty ? west : west.filter { $0.name.contains(search) }
+        search.isEmpty ? west : west.filter { $0.name.contains(search) || ($0.abbr ?? "").contains(search) }
     }
+
+    private let columns = [GridItem(.adaptive(minimum: 168), spacing: 12)]
 
     var body: some View {
         NavigationStack {
-            List {
-                if !filteredEast.isEmpty {
-                    Section("东部联盟") {
-                        ForEach(filteredEast) { team in
-                            NavigationLink {
-                                TeamDetailView(teamId: team.teamId, preview: team)
-                            } label: {
-                                TeamRow(team: team, logo: store.logo(for: team.teamId))
-                            }
-                        }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    if !filteredEast.isEmpty {
+                        conferenceGrid(title: "东部联盟", teams: filteredEast)
                     }
-                }
-                if !filteredWest.isEmpty {
-                    Section("西部联盟") {
-                        ForEach(filteredWest) { team in
-                            NavigationLink {
-                                TeamDetailView(teamId: team.teamId, preview: team)
-                            } label: {
-                                TeamRow(team: team, logo: store.logo(for: team.teamId))
-                            }
-                        }
+                    if !filteredWest.isEmpty {
+                        conferenceGrid(title: "西部联盟", teams: filteredWest)
                     }
-                }
-                if filteredEast.isEmpty && filteredWest.isEmpty {
-                    Section {
+                    if filteredEast.isEmpty && filteredWest.isEmpty {
                         EmptyBlock(title: "未找到球队", message: search)
-                            .listRowBackground(Color.clear)
+                            .padding(.top, 40)
                     }
                 }
+                .padding(.horizontal, Theme.gutter)
+                .padding(.vertical, 12)
+                .readableWidth(1000)
             }
             .navigationTitle("球队")
             .searchable(text: $search, prompt: "搜索球队")
         }
         .task { await store.load() }
     }
-}
 
-struct TeamRow: View {
-    let team: LeagueTeam
-    var logo: String?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            RemoteImage(urlString: logo, width: 30, height: 30)
-            Text(team.name)
-                .font(.body)
-            Spacer()
-            if let abbr = team.abbr {
-                Text(abbr)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+    private func conferenceGrid(title: String, teams: [LeagueTeam]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: title, subtitle: "\(teams.count) 支球队")
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(teams) { team in
+                    NavigationLink {
+                        TeamDetailView(teamId: team.teamId, preview: team)
+                    } label: {
+                        TeamCard(team: team,
+                                  logo: store.logo(for: team.teamId),
+                                  standing: store.standing(for: team.teamId))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding(.vertical, 2)
     }
+}
+
+/// 球队卡片：队徽 + 名称 + 战绩
+struct TeamCard: View {
+    let team: LeagueTeam
+    var logo: String?
+    var standing: TeamStanding?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            RemoteImage(urlString: logo, width: 56, height: 56)
+
+            VStack(spacing: 2) {
+                Text(team.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                if let abbr = team.abbr {
+                    Text(abbr)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let st = standing {
+                HStack(spacing: 8) {
+                    Text("#\(st.rank ?? 0)")
+                        .font(.statNumber(13, weight: .bold))
+                        .foregroundStyle(rank > 0 && rank <= 8 ? .orange : .secondary)
+                    Text(st.record)
+                        .font(.statNumber(14, weight: .semibold))
+                        .monospacedDigit()
+                    if let rate = st.winRate?.raw, !rate.isEmpty {
+                        Text(rate)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Spacer(minLength: 0)
+                    StreakBadge(streak: st.strk?.raw)
+                }
+                .padding(.top, 2)
+            } else {
+                Text("—")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 10)
+        .cardSurface()
+    }
+
+    private var rank: Int { standing?.rank ?? 0 }
 }
 
 // MARK: - 球队详情

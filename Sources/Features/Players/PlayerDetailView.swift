@@ -66,35 +66,11 @@ struct PlayerDetailView: View {
 
     private func profileCard(_ info: PlayerInfo) -> some View {
         VStack(spacing: 14) {
-            HStack(alignment: .top, spacing: 16) {
-                RemoteImage(urlString: info.big_photo ?? info.photo,
-                            width: 96, height: 96, cornerRadius: 12, contentMode: .fill)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(info.name ?? "")
-                        .font(.title2.weight(.bold))
-                    if let eng = info.eng_name {
-                        Text(eng)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let nick = info.nick, !nick.isEmpty {
-                        Text("「\(nick)」")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack(spacing: 10) {
-                        if let num = info.number?.raw, !num.isEmpty {
-                            statChip("#\(num)")
-                        }
-                        if let pos = info.position { statChip(pos) }
-                        if let h = info.heightText { statChip(h) }
-                    }
-                }
-                Spacer(minLength: 0)
+            // 窄宽度（如侧边栏展开时）自动改为上下排列，避免头像与文字互相挤压
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) { infoHeader(info) }
+                VStack(alignment: .leading, spacing: 12) { infoHeader(info) }
             }
-
             Divider()
 
             VStack(spacing: 0) {
@@ -148,6 +124,34 @@ struct PlayerDetailView: View {
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
             .allowsHitTesting(false)
+        }
+    }
+
+    /// 头像 + 姓名区（横向/纵向两种布局复用）
+    private func infoHeader(_ info: PlayerInfo) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            RemoteImage(urlString: info.big_photo ?? info.photo,
+                        width: 96, height: 96, cornerRadius: 12, contentMode: .fill)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(info.name ?? "")
+                    .font(.title2.weight(.bold))
+                if let eng = info.eng_name {
+                    Text(eng)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let nick = info.nick, !nick.isEmpty {
+                    Text("「\(nick)」")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 10) {
+                    if let num = info.number?.raw, !num.isEmpty { statChip("#\(num)") }
+                    if let pos = info.position { statChip(pos) }
+                    if let h = info.heightText { statChip(h) }
+                }
+            }
+            Spacer(minLength: 0)
         }
     }
 

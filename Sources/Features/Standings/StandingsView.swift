@@ -32,6 +32,14 @@ struct StandingsView: View {
         } else if let root = model.standings {
             ScrollView {
                 VStack(spacing: 16) {
+                    // 赛季：可回溯历年
+                    Picker("赛季", selection: $model.season) {
+                        ForEach(model.seasonOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+
                     Picker("赛季阶段", selection: $model.stage) {
                         Text("常规赛").tag("REGULAR")
                         Text("季后赛").tag("PLAYOFF")
@@ -88,9 +96,9 @@ struct StandingsView: View {
 
     /// 标题副文案：赛季已开始显示赛季号，未开始时明确说明
     private func subtitle(for rows: [TeamStanding]) -> String? {
-        let season = model.standings?.season.map { "赛季 \($0)" } ?? ""
+        let season = model.standings?.season ?? model.season
         let started = rows.contains { ($0.won ?? 0) + ($0.lost ?? 0) > 0 }
-        if started { return season }
+        if started { return "赛季 \(season)" }
         return season.isEmpty ? "赛季尚未开始" : "\(season) · 尚未开赛"
     }
 
@@ -168,6 +176,12 @@ struct StandingsView: View {
         return rank <= 8 ? .orange : .secondary
     }
 
+    /// 赛季未开赛时不展示「未开始」的 0-0 排行，改为提示
+    private var hasStarted: Bool {
+        guard let root = model.standings else { return false }
+        return (root.east + root.west).contains { ($0.won ?? 0) + ($0.lost ?? 0) > 0 }
+    }
+
     // MARK: 球队指标榜
 
     @ViewBuilder
@@ -177,7 +191,7 @@ struct StandingsView: View {
                 .padding(.horizontal, Theme.gutter)
 
             VStack(spacing: 12) {
-                Picker("赛季", selection: $model.season) {
+                Picker("赛季", selection: $model.rankSeason) {
                     ForEach(model.seasonOptions, id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -233,8 +247,11 @@ final class StandingsModel {
     private(set) var isLoading = true
     private(set) var errorMessage: String?
 
+    /// 战绩页选中的赛季（可回溯历年）
+    var season = "" { didSet { Task { await loadStandings() } } }
     var stage = "REGULAR" { didSet { Task { await loadStandings() } } }
-    var season = "" { didSet { Task { await loadRank() } } }
+    /// 球队数据榜的赛季（与战绩独立）
+    var rankSeason = "" { didSet { Task { await loadRank() } } }
     var metricName = "" { didSet { Task { await loadRank() } } }
 
     private let client = HupuClient.shared
@@ -255,9 +272,10 @@ final class StandingsModel {
     }
 
     private func loadStandings() async {
+        guard !season.isEmpty else { return }
         do {
             let root: StandingRoot = try await client.fetch(
-                .teamStanding(stage: stage),
+                .teamStanding(stage: stage, season: season),
                 ttl: HupuConfig.TTL.standings)
             standings = root
             errorMessage = nil
@@ -275,25 +293,30 @@ final class StandingsModel {
         if metricName.isEmpty { metricName = metricNames.first ?? "" }
 
         let current = await SeasonProvider.shared.currentSeason()
-        seasonOptions = [current, SeasonUtility.offset(current, by: -1), SeasonUtility.offset(current, by: -2)]
-            .compactMap { $0 }
+        seasonOptions = Self.seasonRange(from: current, count: 10)
         if season.isEmpty { season = current }
+        if rankSeason.isEmpty { rankSeason = current }
         await loadRank()
     }
 
     private func loadRank() async {
-        guard !metricName.isEmpty, !season.isEmpty else { return }
+        guard !metricName.isEmpty, !rankSeason.isEmpty else { return }
         rankTask?.cancel()
         rankTask = Task {
             // 只支持 ptsAvg 这类球队指标 rankType，用名称映射
             guard let rankType = Self.rankType(for: metricName) else { return }
             let result: TeamMetricRank? = try? await client.fetch(
-                .teamSeasonStatsRank(rankType: rankType, season: season),
+                .teamSeasonStatsRank(rankType: rankType, season: rankSeason),
                 ttl: HupuConfig.TTL.rank)
             guard !Task.isCancelled else { return }
             rankRows = result?.rows ?? []
         }
         await rankTask?.value
+    }
+
+    /// 从当前赛季往前数 count 个赛季（含当前）
+    static func seasonRange(from current: String, count: Int) -> [String] {
+        (0..<count).compactMap { SeasonUtility.offset(current, by: -$0) }
     }
 
     /// teamSeasonStatsAllRank 指标名 ↔ teamSeasonStatsRank 的 rankType（实测逐个验证，pace 无完整榜）

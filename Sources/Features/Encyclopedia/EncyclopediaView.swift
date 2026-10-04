@@ -1,7 +1,7 @@
 import SwiftUI
 import NBAKit
 
-/// 百科：历史选秀（1970-2026）+ 历届重要荣誉得主
+/// 百科：历史选秀（1970-2026）+ 历届重要荣誉（可切赛季）
 struct EncyclopediaView: View {
     @State private var model = EncyclopediaModel()
 
@@ -22,94 +22,26 @@ struct EncyclopediaView: View {
             FailureBlock(message: error) { Task { await model.start() } }
         } else {
             List {
-                // 概览统计
-                Section {
-                    HStack(spacing: 0) {
-                        overviewItem("可选年份", "\(model.years.count)", systemImage: "calendar")
-                        Divider().frame(height: 34)
-                        overviewItem("本届球员", "\(model.totalDraftPicks)", systemImage: "person.2")
-                        Divider().frame(height: 34)
-                        overviewItem("荣誉奖项", "\(model.awardCategories.count)", systemImage: "trophy")
-                    }
-                    .padding(.vertical, 6)
-                }
-
-                // 选秀年份选择
-                Section("历史选秀") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(model.selectedYear)
-                                .font(.title3.weight(.bold))
-                                .contentTransition(.numericText())
-                            Spacer()
-                            Picker("年份", selection: $model.selectedYear) {
-                                ForEach(model.years, id: \.self) { Text($0).tag($0) }
-                            }
-                            .pickerStyle(.menu)
-                        }
-
-                        if let draft = model.draft {
-                            if draft.rounds.isEmpty {
-                                Text("该年份暂无数据")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(draft.rounds, id: \.round) { round in
-                                    DisclosureGroup {
-                                        ForEach(round.picks) { pick in
-                                            NavigationLink {
-                                                PlayerDetailView(playerId: pick.playerId ?? "",
-                                                                 previewName: pick.playerName,
-                                                                 previewPhoto: pick.photo)
-                                            } label: {
-                                                DraftPickRow(pick: pick)
-                                            }
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text("第 \(round.round) 轮")
-                                                .font(.subheadline.weight(.medium))
-                                            Spacer()
-                                            Text("\(round.picks.count) 人")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            LoadingBlock()
-                        }
-                    }
-                }
-
-                // 历届荣誉
-                Section("历届重要荣誉") {
-                    ForEach(model.awardCategories) { category in
-                        NavigationLink {
-                            AwardCategoryView(category: category)
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "trophy.fill")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.orange)
-                                    .frame(width: 22)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(category.awardDesc ?? "")
-                                        .font(.subheadline.weight(.medium))
-                                    Text("\(category.winnerCount) 位得主")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
+                overview
+                draftSection
+                awardsSection
             }
             .listStyle(.inset)
-            #if os(iOS)
-            .scrollContentBackground(.hidden)
-            #endif
+        }
+    }
+
+    // MARK: 概览
+
+    private var overview: some View {
+        Section {
+            HStack(spacing: 0) {
+                overviewItem("可选年份", "\(model.years.count)", systemImage: "calendar")
+                Divider().frame(height: 34)
+                overviewItem("本届球员", "\(model.totalDraftPicks)", systemImage: "person.2")
+                Divider().frame(height: 34)
+                overviewItem("荣誉奖项", "\(model.awardCategories.count)", systemImage: "trophy")
+            }
+            .padding(.vertical, 6)
         }
     }
 
@@ -127,6 +59,143 @@ struct EncyclopediaView: View {
         }
         .frame(maxWidth: .infinity)
     }
+
+    // MARK: 历史选秀
+
+    private var draftSection: some View {
+        Section("历史选秀") {
+            Picker("年份", selection: $model.selectedYear) {
+                ForEach(model.years, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowBackground(Color.clear)
+
+            if model.isDraftLoading {
+                LoadingBlock()
+            } else if let draft = model.draft {
+                if draft.rounds.isEmpty {
+                    Text("\(model.selectedYear) 年暂无数据")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(draft.rounds, id: \.round) { round in
+                        draftRound(round)
+                    }
+                }
+            }
+        }
+    }
+
+    private func draftRound(_ round: (round: String, picks: [DraftPick])) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("第 \(round.round) 轮")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(round.picks.count) 人")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+
+            ForEach(round.picks) { pick in
+                NavigationLink {
+                    PlayerDetailView(playerId: pick.playerId ?? "",
+                                     previewName: pick.playerName,
+                                     previewPhoto: pick.photo)
+                } label: {
+                    DraftPickRow(pick: pick)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: 历届重要荣誉
+
+    private var awardsSection: some View {
+        Section {
+            Picker("赛季", selection: $model.awardSeason) {
+                ForEach(model.awardSeasons, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowBackground(Color.clear)
+
+            if model.isAwardsLoading {
+                LoadingBlock()
+            } else if model.awardCategories.isEmpty {
+                Text("该赛季暂无荣誉数据")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                // 每个奖项标题下直接列出该奖项的球员与头像
+                ForEach(model.awardCategories) { category in
+                    awardCategory(category)
+                }
+            }
+        } header: {
+            Text("历届重要荣誉")
+        } footer: {
+            Text("选择赛季查看该赛季各项荣誉得主")
+        }
+    }
+
+    private func awardCategory(_ category: AwardCategory) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: "trophy.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text(category.awardDesc ?? "")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(category.winnerCount) 位得主")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // 横向排列得主，标题下方直接看到球员和头像
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(category.winners.sorted { ($0.season ?? "") > ($1.season ?? "") }) { winner in
+                        NavigationLink {
+                            PlayerDetailView(playerId: winner.playerId ?? "",
+                                             previewName: winner.playerName,
+                                             previewPhoto: winner.photo)
+                        } label: {
+                            winnerChip(winner)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func winnerChip(_ winner: AwardWinner) -> some View {
+        VStack(spacing: 4) {
+            RemoteImage(urlString: winner.photo, width: 46, height: 46,
+                        cornerRadius: 23, contentMode: .fill)
+            Text(winner.playerName ?? "")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(width: 62)
+            Text(winner.teamName ?? "")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(width: 62)
+        }
+    }
 }
 
 // MARK: - 选秀行
@@ -139,13 +208,14 @@ private struct DraftPickRow: View {
             Text("\(pick.rank ?? 0)")
                 .font(.statNumber(13, weight: .semibold))
                 .foregroundStyle(rankColor)
-                .frame(width: 22, alignment: .trailing)
+                .frame(width: 24, alignment: .trailing)
 
-            RemoteImage(urlString: pick.photo, width: 32, height: 32, cornerRadius: 6)
+            RemoteImage(urlString: pick.photo, width: 34, height: 34, cornerRadius: 6)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(pick.playerName ?? "")
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     if let team = pick.draftTeamName { Text(team) }
@@ -164,13 +234,15 @@ private struct DraftPickRow: View {
                     Text(career.careerPts?.raw ?? "-")
                         .font(.statNumber(13, weight: .semibold))
                         .monospacedDigit()
+                        .foregroundStyle(.primary)
                     Text("生涯均分")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
+        .contentShape(.rect)
     }
 
     private var rankColor: Color {
@@ -183,58 +255,6 @@ private struct DraftPickRow: View {
     }
 }
 
-// MARK: - 荣誉分类页
-
-struct AwardCategoryView: View {
-    let category: AwardCategory
-
-    var body: some View {
-        List {
-            ForEach(category.winners.sorted(by: { $0.season ?? "" > $1.season ?? "" })) { winner in
-                NavigationLink {
-                    PlayerDetailView(playerId: winner.playerId ?? "",
-                                     previewName: winner.playerName,
-                                     previewPhoto: winner.photo)
-                } label: {
-                    HStack(spacing: 10) {
-                        RemoteImage(urlString: winner.photo, width: 40, height: 40, cornerRadius: 6)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(winner.playerName ?? "")
-                                .font(.subheadline.weight(.medium))
-                            HStack(spacing: 5) {
-                                Text(winner.season ?? "")
-                                if let team = winner.teamName { Text(team) }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        if let pts = winner.pts, pts > 0 {
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text(String(format: "%.1f", pts))
-                                    .font(.statNumber(14, weight: .semibold))
-                                    .monospacedDigit()
-                                HStack(spacing: 3) {
-                                    if let reb = winner.reb { Text(String(format: "%.1f板", reb)) }
-                                    if let ast = winner.asts { Text(String(format: "%.1f助", ast)) }
-                                }
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-        .navigationTitle(category.awardDesc ?? "荣誉")
-        .inlineNavigationTitle()
-    }
-}
-
 // MARK: - 模型
 
 @MainActor
@@ -243,8 +263,11 @@ final class EncyclopediaModel {
     private(set) var years: [String] = []
     private(set) var draft: DraftRoot?
     private(set) var awardCategories: [AwardCategory] = []
+    private(set) var awardSeasons: [String] = []
     private(set) var totalDraftPicks = 0
     private(set) var isLoading = true
+    private(set) var isDraftLoading = true
+    private(set) var isAwardsLoading = true
     private(set) var errorMessage: String?
 
     var selectedYear = "" {
@@ -253,9 +276,10 @@ final class EncyclopediaModel {
         }
     }
 
-    /// 当年选秀要等夏天才出，默认回退到最近一届有数据的年份
-    private func fallbackYear(_ thisYear: String) -> String {
-        years.first { $0 < thisYear } ?? thisYear
+    var awardSeason = "" {
+        didSet {
+            if oldValue != awardSeason && !awardSeason.isEmpty { Task { await loadAwards() } }
+        }
     }
 
     private let client = HupuClient.shared
@@ -263,7 +287,6 @@ final class EncyclopediaModel {
 
     func start() async {
         if years.isEmpty { await loadYears() }
-        await loadDraft()
         await loadAwards()
         isLoading = false
     }
@@ -281,16 +304,20 @@ final class EncyclopediaModel {
         }
         years = list.sorted(by: >)
         let thisYear = String(SeasonUtility.season(for: .now).prefix(4))
-        selectedYear = years.contains(thisYear) ? thisYear : fallbackYear(thisYear)
+        selectedYear = years.contains(thisYear) ? thisYear : (years.first { $0 < thisYear } ?? thisYear)
         errorMessage = nil
+        await loadDraft()
     }
 
     private func loadDraft() async {
         guard !selectedYear.isEmpty else { return }
         if let cached = draftCache[selectedYear] {
             draft = cached
+            isDraftLoading = false
             return
         }
+        isDraftLoading = true
+        defer { isDraftLoading = false }
         let root: DraftRoot? = try? await client.fetch(.draft(year: selectedYear),
                                                       ttl: HupuConfig.TTL.encyclopedia)
         draft = root
@@ -299,10 +326,16 @@ final class EncyclopediaModel {
     }
 
     private func loadAwards() async {
-        guard awardCategories.isEmpty else { return }
-        let season = await SeasonProvider.shared.currentSeason()
+        isAwardsLoading = true
+        defer { isAwardsLoading = false }
+        if awardSeasons.isEmpty {
+            let current = await SeasonProvider.shared.currentSeason()
+            awardSeasons = (0..<8).compactMap { SeasonUtility.offset(current, by: -$0) }
+            if awardSeason.isEmpty { awardSeason = current }
+        }
+        guard !awardSeason.isEmpty else { return }
         let root: AllAwardsRoot? = try? await client.fetch(
-            .allPlayerAwardList(season: season), ttl: HupuConfig.TTL.encyclopedia)
+            .allPlayerAwardList(season: awardSeason), ttl: HupuConfig.TTL.encyclopedia)
         awardCategories = (root?.categories ?? []).filter { !$0.winners.isEmpty }
     }
 }

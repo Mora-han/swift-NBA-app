@@ -1,4 +1,5 @@
 import SwiftUI
+import NBAKit
 
 @main
 struct NBAApp: App {
@@ -33,6 +34,7 @@ struct RootView: View {
         #endif
     }
 }
+
 
 // MARK: - iOS / iPadOS：系统底部标签栏
 

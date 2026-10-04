@@ -70,16 +70,19 @@ struct InfoRow: View {
     var monospacedValue = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .foregroundStyle(.secondary)
-            Spacer(minLength: 12)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 8)
             Text(value.isEmpty ? "—" : value)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .foregroundStyle(value.isEmpty ? .secondary : .primary)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.subheadline)
     }
@@ -139,8 +142,9 @@ struct StreakBadge: View {
 
 struct LoadingBlock: View {
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             ProgressView()
+                .controlSize(.regular)
             Text("加载中…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -155,6 +159,25 @@ struct FailureBlock: View {
     var retry: (() -> Void)?
 
     var body: some View {
+        #if os(macOS)
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("加载失败")
+                .font(.title3.weight(.medium))
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if let retry {
+                Button("重试", action: retry)
+                    .controlSize(.large)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        #else
         ContentUnavailableView {
             Label("加载失败", systemImage: "exclamationmark.triangle")
         } description: {
@@ -165,19 +188,40 @@ struct FailureBlock: View {
                     .buttonStyle(.borderedProminent)
             }
         }
+        #endif
     }
 }
 
 struct EmptyBlock: View {
     let title: String
     var message: String?
+    var systemImage: String = "tray"
 
     var body: some View {
+        #if os(macOS)
+        // macOS 用更宽松的居中布局，符合桌面应用的留白习惯
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(.title3.weight(.medium))
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+        #else
         ContentUnavailableView {
-            Label(title, systemImage: "tray")
+            Label(title, systemImage: systemImage)
         } description: {
             if let message { Text(message) }
         }
+        #endif
     }
 }
 

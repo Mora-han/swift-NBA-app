@@ -211,6 +211,11 @@ public struct PlayerMatchStats: Decodable, Sendable {
     public let onCourt: Int?
     public let dnp: Int?
 
+    /// 球员照片优先用 photo（大头照），logoUrl 是队标形状的小图
+    var portrait: String? {
+        photo ?? logoUrl
+    }
+
     public var isStarter: Bool { starter == 1 }
     public var isOnCourt: Bool { onCourt == 1 }
     public var didNotPlay: Bool { dnp == 1 }

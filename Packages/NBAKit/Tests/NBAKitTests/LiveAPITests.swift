@@ -57,6 +57,17 @@ final class LiveAPITests: XCTestCase {
 
     // MARK: 战绩与球队榜
 
+    /// 历年战绩：指定赛季应返回该赛季排名（用于「战绩」页的历史切换）
+    func testHistoricalStandings() async throws {
+        for season in ["2025-2026", "2024-2025", "2023-2024"] {
+            let root: StandingRoot = try await api.fetch(.teamStanding(stage: "REGULAR", season: season))
+            XCTAssertEqual(root.season, season, "应返回请求的赛季")
+            XCTAssertFalse(root.east.isEmpty, "\(season) 东部应有数据")
+            XCTAssertFalse(root.west.isEmpty, "\(season) 西部应有数据")
+            XCTAssertNotNil(root.east.first?.teamId)
+        }
+    }
+
     func testStandings() async throws {
         let root: StandingRoot = try await api.fetch(.teamStandingList)
         XCTAssertFalse(root.east.isEmpty)

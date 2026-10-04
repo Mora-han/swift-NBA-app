@@ -10,6 +10,26 @@ struct ScoresView: View {
             content
                 .navigationTitle("比分")
                 .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        HStack(spacing: 2) {
+                            Button {
+                                Task { await model.step(by: -1) }
+                            } label: {
+                                Image(systemName: "chevron.left")
+                            }
+                            Button {
+                                Task { await model.step(by: 1) }
+                            } label: {
+                                Image(systemName: "chevron.right")
+                            }
+                            Button {
+                                Task { await model.select(day: Date.compactDayKey) }
+                            } label: {
+                                Text("今天").font(.subheadline)
+                            }
+                        }
+                        .disabled(model.isRefreshing)
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         if model.hasLive {
                             HStack(spacing: 4) {
@@ -46,7 +66,7 @@ struct ScoresView: View {
             ScrollView {
                 LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
                     Section {
-                        if let day = model.selectedDayObject {
+                        if let day = model.selectedDayObject, day.day == model.anchorDate {
                             DaySection(day: day, matches: day.matches)
                         } else {
                             EmptyBlock(title: "该日暂无赛程", message: "换个日期看看")
@@ -75,7 +95,7 @@ private struct DayStrip: View {
                     HStack(spacing: 8) {
                         ForEach(model.days) { day in
                             Button {
-                                withAnimation(.snappy(duration: 0.2)) { model.selectedDay = day.day }
+                                Task { await model.select(day: day.day ?? "") }
                             } label: {
                                 VStack(spacing: 1) {
                                     Text(day.shortWeekday)
@@ -92,12 +112,12 @@ private struct DayStrip: View {
                                 }
                                 .frame(width: 44, height: 54)
                                 .background(
-                                    model.selectedDay == day.day
+                                    model.anchorDate == day.day
                                         ? Color.accentColor
                                         : Color(.tertiarySystemFill),
                                     in: .rect(cornerRadius: 12)
                                 )
-                                .foregroundStyle(model.selectedDay == day.day ? .white : .primary)
+                                .foregroundStyle(model.anchorDate == day.day ? .white : .primary)
                                 .id(day.day)
                             }
                             .buttonStyle(.plain)
@@ -108,18 +128,25 @@ private struct DayStrip: View {
                 }
                 .scrollIndicators(.hidden)
                 .onAppear {
-                    if let selected = model.selectedDay {
-                        proxy.scrollTo(selected, anchor: .center)
-                    }
+                    proxy.scrollTo(model.anchorDate, anchor: .center)
                 }
-                .onChange(of: model.selectedDay) { _, selected in
-                    guard let selected else { return }
+                .onChange(of: model.anchorDate) { _, selected in
                     withAnimation(.easeInOut) { proxy.scrollTo(selected, anchor: .center) }
                 }
             }
             Divider()
         }
-        .background(.bar)
+        .background(stripBackground)
+    }
+
+    /// 日期条背景：iOS 用系统 bar 材质（参与 Liquid Glass 折射），
+    /// macOS 用窗口材质（顶栏式材质在桌面端观感不对）
+    private var stripBackground: some View {
+        #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(uiColor: .systemBackground)
+        #endif
     }
 }
 
@@ -251,22 +278,30 @@ struct MatchRow: View {
 @MainActor
 @Observable
 final class ScoresModel {
+    /// 以选中日期为中心，前后各一周（接口单次窗口约 ±5~13 天）
     private(set) var days: [ScheduleDay] = []
     private(set) var isInitialLoading = true
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
-    var selectedDay: String?
+
+    /// 当前浏览的日期（yyyyMMdd），日期条与列表都基于它
+    private(set) var anchorDate: String
 
     private let client = HupuClient.shared
     private var pollTask: Task<Void, Never>?
+
+    init(today: String = Date.compactDayKey) {
+        anchorDate = today
+    }
+
+    var selectedDay: String { anchorDate }
 
     var hasLive: Bool {
         days.flatMap(\.matches).contains { $0.isLive }
     }
 
-    /// 当前选中的那一天（日期条 = 列表过滤器，与系统 App 的日赛程交互一致）
     var selectedDayObject: ScheduleDay? {
-        days.first { $0.day == selectedDay }
+        days.first { $0.day == anchorDate } ?? days.first
     }
 
     func liveMatchCount(on day: ScheduleDay) -> Int {
@@ -275,41 +310,46 @@ final class ScoresModel {
 
     func start(force: Bool = false) async {
         if !force, !days.isEmpty { return }
-        await refresh(force: force)
+        await load(anchor: anchorDate)
         startPolling()
     }
 
+    /// 切换日期：锚点变更后重新取该日期前后一周的窗口
+    func select(day: String) async {
+        guard day != anchorDate else { return }
+        anchorDate = day
+        days = []
+        await load(anchor: day)
+    }
+
+    /// 左右翻页（一天一天翻，符合日期条交互）
+    func step(by offset: Int) async {
+        guard let target = Date.compactDayKey(offsetDays: offset, from: anchorDate) else { return }
+        await select(day: target)
+    }
+
     func refresh(force: Bool) async {
-        isRefreshing = true
+        await load(anchor: anchorDate, force: force)
+    }
+
+    private func load(anchor: String, force: Bool = false) async {
+        if !days.isEmpty { isRefreshing = true }
         defer { isRefreshing = false; isInitialLoading = false }
 
-        // 优先取「今天」的窗口；无参数接口会返回赛季中段的历史窗口，需要用 currentDate 纠正
+        // 接口的 day 参数是「以该日为中心」的窗口锚点，能覆盖到真实赛程；
+        // 不传 day 时虎扑会返回一个被季后赛残留占据的旧窗口，导致真实比赛看不到。
         let root: ScheduleRoot
         do {
-            root = try await client.fetch(.scheduleList(day: nil), ttl: HupuConfig.TTL.schedule,
-                                         forceRefresh: force)
+            root = try await client.fetch(.scheduleList(day: anchor),
+                                          ttl: HupuConfig.TTL.schedule,
+                                          forceRefresh: force)
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return
         }
 
-        var newDays = root.gameList ?? []
-        let current = root.scheduleListStats?.currentDate
-        // 无 day 参数时虎扑返回的是赛季中段窗口；若窗口不含今天，改为以今天为锚点再取一次
-        if let current, !newDays.contains(where: { $0.day == current }) {
-            let today: ScheduleRoot? = try? await client.fetch(.scheduleList(day: current),
-                                                               ttl: HupuConfig.TTL.schedule,
-                                                               forceRefresh: force)
-            if let list = today?.gameList, !list.isEmpty { newDays = list }
-        }
-
-        days = newDays.sorted { ($0.day ?? "") < ($1.day ?? "") }
-        if selectedDay == nil {
-            // 默认定位到「今天」，窗口里没有今天就取最近的一场
-            selectedDay = current.flatMap { today in
-                days.contains(where: { $0.day == today }) ? today : nil
-            } ?? days.first(where: { !$0.matches.isEmpty })?.day
-        }
+        let list = root.gameList ?? []
+        days = list.sorted { ($0.day ?? "") < ($1.day ?? "") }
         errorMessage = nil
     }
 
@@ -323,7 +363,35 @@ final class ScoresModel {
             }
         }
     }
+}
 
+// MARK: - 日期工具
+
+extension Date {
+    /// 今天（北京时间）的 yyyyMMdd
+    static var compactDayKey: String {
+        compactDayKey(for: .now)
+    }
+
+    static func compactDayKey(for date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d%02d%02d", c.year ?? 2026, c.month ?? 1, c.day ?? 1)
+    }
+
+    static func compactDayKey(offsetDays: Int, from key: String) -> String? {
+        guard let base = parseCompactDayKey(key) else { return nil }
+        return compactDayKey(for: base.addingTimeInterval(Double(offsetDays) * 86400))
+    }
+
+    static func parseCompactDayKey(_ key: String) -> Date? {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return f.date(from: key)
+    }
 }
 
 // MARK: - ScheduleDay 便利字段

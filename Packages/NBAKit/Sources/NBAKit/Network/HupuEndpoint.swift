@@ -83,7 +83,7 @@ public enum HupuEndpoint: Sendable, Hashable {
 
     // 球队
     case teamStandingList                           // 东西部战绩（默认当前阶段）
-    case teamStanding(stage: String)                // 指定阶段战绩（REGULAR/PLAYOFF）
+    case teamStanding(stage: String, season: String)  // 指定阶段 + 赛季战绩（历年排名）
     case teamSeasonStatsRank(rankType: String, season: String) // 单指标球队榜（30 队）
     case teamSeasonStatsAllRank                     // 全指标球队榜清单（指标菜单）
     case teamBasicInfo(teamId: String)
@@ -162,8 +162,9 @@ public enum HupuEndpoint: Sendable, Hashable {
             return [URLQueryItem(name: "matchId", value: m)]
         case .teamStandingList:
             return nbaOffline
-        case .teamStanding(let stage):
-            return nbaOffline + [URLQueryItem(name: "competitionStageType", value: stage)]
+        case .teamStanding(let stage, let season):
+            return nbaOffline + [URLQueryItem(name: "competitionStageType", value: stage),
+                                 URLQueryItem(name: "season", value: season)]
         case .teamSeasonStatsRank(let rankType, let season):
             return [URLQueryItem(name: "rankType", value: rankType),
                     URLQueryItem(name: "leagueType", value: "NBA"),
