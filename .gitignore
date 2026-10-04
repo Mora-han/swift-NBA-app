@@ -1,0 +1,17 @@
+# XcodeGen 生成物，可随时用 xcodegen generate 重建
+NBA.xcodeproj/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# 构建产物
+build/
+
+# macOS
+.DS_Store
