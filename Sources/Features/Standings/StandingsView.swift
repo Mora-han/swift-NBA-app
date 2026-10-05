@@ -9,6 +9,7 @@ struct StandingsView: View {
         NavigationStack {
             content
                 .navigationTitle("战绩")
+                .inlineNavigationTitle()
                 .refreshable { await model.reload(force: true) }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
@@ -47,21 +48,32 @@ struct StandingsView: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal, Theme.gutter)
 
-                    conferenceSection(title: "东部联盟", rows: root.east)
-                    conferenceSection(title: "西部联盟", rows: root.west)
+                    // iPad / 宽屏：东西部并排，减少纵向滚动
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 16) {
+                            conferenceSection(title: "东部联盟", rows: root.east)
+                            conferenceSection(title: "西部联盟", rows: root.west)
+                        }
+                        .frame(minWidth: 1090)
+                        VStack(spacing: 16) {
+                            conferenceSection(title: "东部联盟", rows: root.east)
+                            conferenceSection(title: "西部联盟", rows: root.west)
+                        }
+                    }
 
                     if !model.metricNames.isEmpty {
                         teamStatRankSection
                     }
                 }
                 .padding(.bottom, 24)
-                .readableWidth()
+                .pageWidth(1400)
             }
         }
     }
 
     private func conferenceSection(title: String, rows: [TeamStanding]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            Group {
             SectionHeader(title: title,
                           subtitle: subtitle(for: rows))
                 .padding(.horizontal, Theme.gutter)
@@ -73,25 +85,30 @@ struct StandingsView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
             } else {
-                LazyVStack(spacing: 0) {
-                    headerRow
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        NavigationLink {
-                            TeamDetailView(teamId: row.teamId ?? "")
-                        } label: {
-                            standingRow(row)
-                        }
-                        .buttonStyle(.plain)
+                ScrollView(.horizontal) {
+                    LazyVStack(spacing: 0) {
+                        headerRow
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            NavigationLink {
+                                TeamDetailView(teamId: row.teamId ?? "")
+                            } label: {
+                                standingRow(row)
+                            }
+                            .buttonStyle(.plain)
 
-                        if index < rows.count - 1 {
-                            Divider().padding(.leading, 46)
+                            if index < rows.count - 1 {
+                                Divider().padding(.leading, 60)
+                            }
                         }
                     }
+                    .frame(minWidth: 520, maxWidth: .infinity)
                 }
-                .padding(.horizontal, Theme.gutter)
+                .scrollIndicators(.hidden)
                 .cardSurface()
             }
+            }
         }
+        .frame(maxWidth: .infinity)
     }
 
     /// 标题副文案：赛季已开始显示赛季号，未开始时明确说明
@@ -103,65 +120,68 @@ struct StandingsView: View {
     }
 
     private var headerRow: some View {
-        HStack(spacing: 4) {
-            Text("球队").frame(maxWidth: .infinity, alignment: .leading)
-            Text("战绩").frame(width: 46, alignment: .trailing)
-            Text("胜率").frame(width: 44, alignment: .trailing)
-            Text("主场").frame(width: 44, alignment: .trailing)
-            Text("客场").frame(width: 44, alignment: .trailing)
-            Text("近况").frame(width: 40, alignment: .trailing)
+        HStack(spacing: 6) {
+            Text("球队").frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+            Text("战绩").frame(width: 58, alignment: .trailing)
+            Text("胜率").frame(width: 56, alignment: .trailing)
+            Text("主场").frame(width: 56, alignment: .trailing)
+            Text("客场").frame(width: 56, alignment: .trailing)
+            Text("近况").frame(width: 46, alignment: .trailing)
         }
-        .font(.caption2.weight(.semibold))
+        .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(.quaternary.opacity(0.4))
     }
 
     private func standingRow(_ row: TeamStanding) -> some View {
         HStack(spacing: 4) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Text("\(row.rank ?? 0)")
-                    .font(.statNumber(13, weight: .semibold))
+                    .font(.statNumber(16, weight: .semibold))
                     .foregroundStyle(playoffColor(row.rank))
-                    .frame(width: 18, alignment: .trailing)
+                    .frame(width: 22, alignment: .trailing)
 
-                RemoteImage(urlString: row.logoLink, width: 26, height: 26)
+                RemoteImage(urlString: row.logoLink, width: 38, height: 38)
+                    .padding(.trailing, 2)
 
                 Text(row.teamName ?? "")
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 16, weight: .medium))
                     .lineLimit(1)
+                    .layoutPriority(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(row.record)
-                .font(.statNumber(13, weight: .semibold))
+                .font(.statNumber(16, weight: .semibold))
                 .monospacedDigit()
-                .frame(width: 46, alignment: .trailing)
+                .frame(width: 58, alignment: .trailing)
 
             Text(row.winRate?.raw ?? "-")
-                .font(.statNumber(12))
+                .font(.statNumber(14))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+                .frame(width: 56, alignment: .trailing)
 
             Text(halfRecord(row.homeWins, row.homeLosses))
-                .font(.statNumber(12))
+                .font(.statNumber(14))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+                .frame(width: 56, alignment: .trailing)
 
             Text(halfRecord(row.awayWins, row.awayLosses))
-                .font(.statNumber(12))
+                .font(.statNumber(14))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+                .frame(width: 56, alignment: .trailing)
 
             StreakBadge(streak: row.strk?.raw)
-                .frame(width: 40, alignment: .trailing)
+                .frame(width: 46, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .contentShape(.rect)
     }
 
@@ -203,26 +223,26 @@ struct StandingsView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(model.rankRows.enumerated()), id: \.element.id) { index, row in
-                            HStack(spacing: 8) {
+                            HStack(spacing: 10) {
                                 Text("\(row.rank ?? index + 1)")
-                                    .font(.statNumber(13, weight: .semibold))
+                                    .font(.statNumber(15, weight: .semibold))
                                     .foregroundStyle(.secondary)
-                                    .frame(width: 20, alignment: .trailing)
+                                    .frame(width: 26, alignment: .trailing)
 
-                                RemoteImage(urlString: row.logoUrl, width: 24, height: 24)
+                                RemoteImage(urlString: row.logoUrl, width: 34, height: 34)
 
                                 Text(row.teamName ?? "")
-                                    .font(.subheadline)
+                                    .font(.system(size: 16))
                                     .lineLimit(1)
 
                                 Spacer()
 
                                 Text(row.value?.raw ?? "-")
-                                    .font(.statNumber(14, weight: .semibold))
+                                    .font(.statNumber(18, weight: .semibold))
                                     .monospacedDigit()
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
                             .overlay(alignment: .bottom) { Divider() }
                         }
                     }

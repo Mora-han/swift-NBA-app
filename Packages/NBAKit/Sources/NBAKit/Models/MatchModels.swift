@@ -20,6 +20,11 @@ public struct FlexString: Decodable, Hashable, Sendable {
     }
 }
 
+public extension FlexString {
+    /// 计数型字段（阅读数/回复数）在部分帖子以字符串返回，这里统一取整
+    var intValue: Int? { Int(raw) }
+}
+
 // MARK: - 赛程 / 比赛
 
 public struct ScheduleRoot: Decodable, Sendable {

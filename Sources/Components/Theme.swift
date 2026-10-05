@@ -113,10 +113,16 @@ extension View {
 }
 
 extension View {
-    /// 宽屏（iPad 横屏 / Mac）下限制正文宽度，避免一行拉到 1200pt 难以阅读
-    func readableWidth(_ max: CGFloat = 760) -> some View {
+    /// 正文最大宽度。iPad 上不再收窄到 760pt —— 改为铺满可用宽度并靠「自适应列数」
+    /// 提升信息密度，宽屏一行可以放下更多卡片。macOS 窗口本身较窄，保留上限。
+    func pageWidth(_ max: CGFloat = 1400) -> some View {
+        #if os(macOS)
+        frame(maxWidth: min(max, 1000))
+            .frame(maxWidth: .infinity)
+        #else
         frame(maxWidth: max)
-        .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity)
+        #endif
     }
 
     /// 页面背景（跟随系统深浅色）
@@ -126,6 +132,47 @@ extension View {
         #else
         background(Theme.groupedBackground.ignoresSafeArea())
         #endif
+    }
+}
+
+// MARK: - 宽屏判定（环境值，全局共享）
+
+private struct WideLayoutKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// iPad 全屏 / iPhone 横屏 / macOS：放大排版并启用多列布局
+    var isWideLayout: Bool {
+        get { self[WideLayoutKey.self] }
+        set { self[WideLayoutKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// 按可用宽度注入 isWideLayout，并给出内容最大宽度
+    func wideLayout(_ max: CGFloat = 1400) -> some View {
+        GeometryReader { geo in
+            self.environment(\.isWideLayout, geo.size.width >= 700)
+                .frame(maxWidth: max, alignment: .center)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+// MARK: - 自适应列数
+
+/// 根据容器宽度算列数：`floor((w + spacing) / (minWidth + spacing))`，并夹在上限内。
+struct AdaptiveColumns {
+    static func count(for width: CGFloat, minimum: CGFloat, spacing: CGFloat, maximum: Int) -> Int {
+        guard width > 0 else { return maximum }
+        let n = Int(((width + spacing) / (minimum + spacing)).rounded(.down))
+        return max(1, min(maximum, n))
+    }
+
+    static func grid(for width: CGFloat, minimum: CGFloat, spacing: CGFloat, maximum: Int) -> [GridItem] {
+        let n = count(for: width, minimum: minimum, spacing: spacing, maximum: maximum)
+        return Array(repeating: GridItem(.flexible(), spacing: spacing), count: n)
     }
 }
 

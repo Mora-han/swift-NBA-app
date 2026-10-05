@@ -9,7 +9,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "1.1.0"
+    MARKETING_VERSION: "1.3.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
     CODE_SIGN_STYLE: Automatic
@@ -29,6 +29,10 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
+      - path: AppIcon.icon
+      # 启动图 storyboard 只给 iOS 编：macOS 不认 UIKit storyboard，
+      # 单一多平台 target 下无法用 source 级过滤，改用下方按 SDK 的条件构建设置排除
+      - path: Resources/LaunchScreen.storyboard
     dependencies:
       - package: NBAKit
     info:
@@ -39,7 +43,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.sports
         ITSAppUsesNonExemptEncryption: false
-        UILaunchScreen: {}
+        # iOS 系统启动图（原生机制，非自建遮罩）：用 launch storyboard 才能自适应屏幕。
+        # UILaunchScreen 的 UIImageName 只能按图片自然尺寸居中，做不到随屏缩放，故不用。
+        UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -62,6 +68,8 @@ targets:
         ENABLE_PREVIEWS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # macOS 侧不编启动图（ibtool 拒绝 iOS storyboard）；iOS 侧照常编进 Resources
+        "EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]": "LaunchScreen.storyboard"
     scheme:
       run:
         config: Debug

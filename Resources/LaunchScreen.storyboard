@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  启动图（原生 UILaunchStoryboardName，非自建遮罩）
+  标志随屏幕尺寸自适应：
+    · 高度 = 父视图高度 × 0.42（优先级 999，可被宽度上限压低）
+    · 宽度 ≤ 父视图宽度 × 0.35（必须满足，避免窄长屏上标志过大）
+    · 宽高比锁定为素材比例 239:574，水平/垂直居中
+  背景用 SplashBackground 色板，跟随深浅色，与 App 内页面背景一致。
+  launch screen 不允许自定义类，只使用 UIKit 内建控件。
+-->
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23094" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="Lch-SS-001">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="23084"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--启动图-->
+        <scene sceneID="Scn-EE-001">
+            <objects>
+                <viewController id="Lch-SS-001" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="Roo-TV-001">
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="Splash" translatesAutoresizingMaskIntoConstraints="NO" id="Log-OO-001">
+                                <rect key="frame" x="126" y="257" width="141" height="338"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" secondItem="Log-OO-001" secondAttribute="height" multiplier="0.416376" id="Con-AS-001"/>
+                                </constraints>
+                            </imageView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="Saf-AA-001"/>
+                        <color key="backgroundColor" name="SplashBackground"/>
+                        <constraints>
+                            <constraint firstItem="Log-OO-001" firstAttribute="centerX" secondItem="Roo-TV-001" secondAttribute="centerX" id="Con-CX-001"/>
+                            <constraint firstItem="Log-OO-001" firstAttribute="centerY" secondItem="Roo-TV-001" secondAttribute="centerY" id="Con-CY-001"/>
+                            <constraint firstItem="Log-OO-001" firstAttribute="height" secondItem="Roo-TV-001" secondAttribute="height" multiplier="0.42" priority="999" id="Con-HT-001"/>
+                            <constraint firstItem="Log-OO-001" firstAttribute="width" relation="lessThanOrEqual" secondItem="Roo-TV-001" secondAttribute="width" multiplier="0.35" id="Con-WD-001"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="Fir-SS-001" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="53" y="375"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="Splash" width="239" height="574"/>
+        <namedColor name="SplashBackground">
+            <color red="0.94901960784313721" green="0.94901960784313721" blue="0.96862745098039216" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
+</document>

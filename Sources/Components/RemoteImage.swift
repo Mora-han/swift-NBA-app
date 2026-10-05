@@ -86,6 +86,77 @@ struct RemoteImage: View {
     }
 }
 
+/// 正文图：高度未知，按图片自身比例取尺寸，并且**永不放大**（表情/小图保持原大小）。
+/// 超过 maxWidth / maxHeight 时等比缩放到框内。
+struct RemoteContentImage: View {
+    let urlString: String?
+    var maxWidth: CGFloat = 640
+    var maxHeight: CGFloat = 460
+
+    @State private var phase: Phase = .loading
+
+    private enum Phase {
+        case loading
+        case success(PlatformImage)
+        case empty
+    }
+
+    var body: some View {
+        Group {
+            if case .success(let image) = phase {
+                imageView(image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size(for: image).width, height: size(for: image).height)
+                    .clipShape(.rect(cornerRadius: 8))
+            } else if case .loading = phase {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary)
+                    .frame(width: min(maxWidth, 320), height: 150)
+                    .overlay { ProgressView().controlSize(.small) }
+            }
+        }
+        .frame(maxWidth: maxWidth, alignment: .leading)
+        .task(id: urlString) { await load() }
+    }
+
+    #if canImport(UIKit)
+    private func imageView(_ image: PlatformImage) -> Image { Image(uiImage: image) }
+    #else
+    private func imageView(_ image: PlatformImage) -> Image { Image(nsImage: image) }
+    #endif
+
+    /// 等比缩放到框内，且 scale ≤ 1（不放大）
+    private func size(for image: PlatformImage) -> CGSize {
+        let raw = image.size
+        guard raw.width > 1, raw.height > 1 else { return CGSize(width: 120, height: 120) }
+        let scale = min(1, maxWidth / raw.width, maxHeight / raw.height)
+        return CGSize(width: (raw.width * scale).rounded(), height: (raw.height * scale).rounded())
+    }
+
+    private func load() async {
+        guard let url = HupuMedia.imageURL(urlString) else {
+            phase = .empty
+            return
+        }
+        if let cached = await ImageCache.shared.image(for: url) {
+            phase = .success(cached)
+            return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let image = PlatformImage(data: data) else {
+                phase = .empty
+                return
+            }
+            await ImageCache.shared.store(image, for: url)
+            phase = .success(image)
+        } catch {
+            phase = .empty
+        }
+    }
+}
+
 /// 图片缓存（actor，线程安全，内存 200 张 + 磁盘）
 actor ImageCache {
     static let shared = ImageCache()

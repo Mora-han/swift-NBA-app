@@ -22,104 +22,102 @@ struct StatsTable: View {
     /// 点击行（可选）
     var onSelect: ((StatsRowData) -> Void)?
 
-    @Environment(\.horizontalSizeClass) private var sizeClass
-
-    private var isWide: Bool {
-        #if os(macOS)
-        true
-        #else
-        sizeClass == .regular
-        #endif
-    }
-
     var body: some View {
-        if isWide {
-            ScrollView(.horizontal) {
-                tableGrid
-                    .frame(minWidth: 620)
-            }
-            .scrollIndicators(.hidden)
-        } else {
-            ScrollView(.horizontal) {
-                tableGrid
-                    .frame(minWidth: 480)
-            }
-            .scrollIndicators(.hidden)
+        ScrollView(.horizontal) {
+            tableGrid
         }
+        .scrollIndicators(.hidden)
     }
 
-    /// 用 LazyVGrid 实现等宽表格（macOS 上比 Table 更适合可排序的宽数据）
+    /// 用 LazyVStack 实现等宽表格；每列宽度由表头字数估算，避免中文表头被截断。
+    /// 名称列用固定宽度，其余列等宽，横向内容不足时整体可滚动。
     private var tableGrid: some View {
-        let columns = headers.count
-        return LazyVGrid(
-            columns: Array(repeating: GridItem(.fixed(64), spacing: 0, alignment: .trailing), count: max(columns, 1)),
-            alignment: .trailing,
-            spacing: 0
-        ) {
-            headerRow
+        let widths = resolvedColumnWidths
+        return LazyVStack(spacing: 0) {
+            headerRow(widths: widths)
             ForEach(rows) { row in
-                dataRow(row)
+                dataRow(row, widths: widths)
             }
         }
+        .frame(minWidth: totalWidth(for: widths))
         .cardSurface()
         .clipShape(.rect(cornerRadius: Theme.cardRadius))
     }
 
-    private var headerRow: some View {
-        HStack(spacing: 0) {
-            nameCell("")
-                .frame(width: 132, alignment: .leading)
-                ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
-                    Text(header)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(width: 64, alignment: .trailing)
-                }
+    private func totalWidth(for widths: [CGFloat]) -> CGFloat {
+        widths.reduce(0, +) + 24
+    }
+
+    /// 中文按全宽、其余按半宽估算列宽，并夹在合理区间内
+    private var resolvedColumnWidths: [CGFloat] {
+        headers.map { header in
+            let textWidth = header.reduce(0.0) { acc, ch in
+                acc + (isWideGlyph(ch) ? 14.0 : 8.0)
+            }
+            return max(58, min(130, textWidth + 24))
         }
-        .padding(.vertical, 8)
-        .padding(.trailing, 10)
+    }
+
+    private func isWideGlyph(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first else { return false }
+        let v = scalar.value
+        return (0x2E80...0x9FFF).contains(v) || (0xFF00...0xFFEF).contains(v)
+    }
+
+    private func headerRow(widths: [CGFloat]) -> some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: nameColumnWidth, height: 0)
+            ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
+                Text(header)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: widths[safe: index] ?? 58, alignment: .trailing)
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
         .background(.quaternary.opacity(0.4))
     }
 
-    private func nameCell(_ text: String) -> some View {
-        Text(text)
-            .font(.subheadline.weight(.medium))
-            .lineLimit(1)
-            .padding(.leading, 10)
-    }
+    private var nameColumnWidth: CGFloat { 150 }
 
-    private func dataRow(_ row: StatsRowData) -> some View {
+    private func dataRow(_ row: StatsRowData, widths: [CGFloat]) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if row.photo != nil {
-                    RemoteImage(urlString: row.photo, width: 22, height: 22, cornerRadius: 4)
+                    RemoteImage(urlString: row.photo, width: 28, height: 28, cornerRadius: 6)
                 }
                 Text(row.name)
-                    .font(.subheadline)
+                    .font(.system(size: 14))
                     .lineLimit(1)
             }
-            .frame(width: 132, alignment: .leading)
-            .padding(.leading, 10)
+            .frame(width: nameColumnWidth, alignment: .leading)
 
-            ForEach(Array(row.values.enumerated()), id: \.offset) { _, value in
-                Text(value.isEmpty ? "—" : value)
-                    .font(.statNumber(13, weight: row.highlight ? .bold : .regular))
+            ForEach(Array(row.values.enumerated()), id: \.offset) { index, value in
+                Text(value.isEmpty ? "\u{2014}" : value)
+                    .font(.statNumber(14, weight: row.highlight ? .bold : .regular))
                     .monospacedDigit()
-                    .foregroundStyle(value == "—" ? .secondary : .primary)
+                    .foregroundStyle(value.isEmpty || value == "\u{2014}" ? .secondary : .primary)
                     .lineLimit(1)
-                    .frame(width: 64, alignment: .trailing)
+                    .frame(width: widths[safe: index] ?? 58, alignment: .trailing)
             }
         }
-        .padding(.vertical, 7)
-        .padding(.trailing, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
+        .frame(minWidth: totalWidth(for: widths), alignment: .leading)
         .background(row.highlight ? Color.accentColor.opacity(0.08) : .clear)
         .contentShape(.rect)
         .onTapGesture {
             guard let onSelect else { return }
             onSelect(row)
         }
+    }
+}
+
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -152,7 +150,7 @@ struct RankList<Destination: View>: View {
                 .buttonStyle(.plain)
 
                 if index < entries.count - 1 {
-                    Divider().padding(.leading, 52)
+                    Divider().padding(.leading, 58)
                 }
             }
         }
@@ -161,38 +159,40 @@ struct RankList<Destination: View>: View {
     }
 
     private func label(for entry: Entry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Text("\(entry.rank)")
-                .font(.statNumber(14, weight: .semibold))
+                .font(.statNumber(16, weight: .semibold))
                 .foregroundStyle(rankColor(entry.rank))
-                .frame(width: 26, alignment: .trailing)
+                .frame(width: 30, alignment: .trailing)
 
-            RemoteImage(urlString: entry.photo, width: 32, height: 32, cornerRadius: 6)
+            RemoteImage(urlString: entry.photo, width: 44, height: 44, cornerRadius: 8, contentMode: .fill)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name)
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 16, weight: .medium))
                     .lineLimit(1)
                 if let subtitle = entry.subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 10)
 
             Text(entry.value)
-                .font(.statNumber(15, weight: .semibold))
+                .font(.statNumber(19, weight: .semibold))
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Image(systemName: "chevron.right")
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(entry.isUserHighlighted ? Color.accentColor.opacity(0.1) : .clear)
         .contentShape(.rect)
     }

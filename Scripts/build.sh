@@ -46,9 +46,11 @@ publish() {
     xattr -cr "$2" 2>/dev/null || true
 }
 
-# compile <destination> <产物名>
+# compile <destination> <产物名> <products 子目录>
+# macOS 产物落在 Build/Products/<CONFIG>/，而 iOS 模拟器落在 Build/Products/<CONFIG>-iphonesimulator/，
+# 必须按平台指定子目录，否则会把已存在的 macOS 包当成 iOS 产物发布出去。
 compile() {
-    local dest="$1" name="$2"
+    local dest="$1" name="$2" products="$3"
     log "$name ($CONFIG)"
     local log_file; log_file="$(mktemp)"
     if xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
@@ -56,16 +58,15 @@ compile() {
             -derivedDataPath "$DERIVED" \
             CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
             build >"$log_file" 2>&1; then
-        local app
-        app="$(find "$DERIVED/Build/Products/$CONFIG" -maxdepth 1 -name 'NBA.app' | head -1)"
-        if [ -n "$app" ] && [ -d "$app" ]; then
+        local app="$DERIVED/Build/Products/$products/NBA.app"
+        if [ -d "$app" ]; then
             publish "$app" "$OUT/$name.app"
             local size; size=$(du -sh "$OUT/$name.app" | cut -f1)
             ok "$name.app  $size"
             SUMMARY+=("✅  $OUT/$name.app  ($size)")
         else
-            fail "$name 编译成功但未找到 .app"
-            SUMMARY+=("❌  $name: 未找到 .app")
+            fail "$name 编译成功但未找到 $products/NBA.app"
+            SUMMARY+=("❌  $name: 未找到产物")
         fi
     else
         fail "$name 编译失败："
@@ -81,8 +82,8 @@ if command -v xcodegen >/dev/null 2>&1; then
 fi
 [ -d "$PROJECT" ] || { fail "找不到 $PROJECT，请先安装 xcodegen: brew install xcodegen"; exit 1; }
 
-compile 'platform=macOS' 'NBA'
-[ "$WITH_IOS" -eq 1 ] && compile 'generic/platform=iOS Simulator' 'NBA-iOS-Simulator'
+compile 'platform=macOS' 'NBA' "$CONFIG"
+[ "$WITH_IOS" -eq 1 ] && compile 'generic/platform=iOS Simulator' 'NBA-iOS-Simulator' "$CONFIG-iphonesimulator"
 
 echo
 echo "────────────────────────────────────────────────"

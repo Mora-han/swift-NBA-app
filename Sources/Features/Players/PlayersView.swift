@@ -9,6 +9,7 @@ struct PlayersView: View {
         NavigationStack {
             content
                 .navigationTitle("球员")
+                .inlineNavigationTitle()
                 .searchable(text: $model.query, prompt: "搜索球员（中文/英文）")
                 .onChange(of: model.query) { _, newValue in
                     Task { await model.search(newValue) }
@@ -38,9 +39,10 @@ struct PlayersView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    MetricPicker(title: "数据榜", items: model.metricNames,
-                                 selection: $model.metricName,
-                                 systemImage: "list.number")
+                    IdMetricPicker(title: "数据榜",
+                                   items: model.pickerItems,
+                                   selectionID: $model.metricID,
+                                   systemImage: "list.number")
                 }
                 .padding(.horizontal, Theme.gutter)
 
@@ -63,14 +65,14 @@ struct PlayersView: View {
                         Text(model.isLoadingFull
                              ? "正在加载完整榜单…"
                              : "共 \(model.currentRows.count) 名球员")
-                            .font(.caption)
+                            .font(.system(size: 13))
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.top, -6)
                 }
             }
             .padding(.bottom, 24)
-            .readableWidth()
+            .pageWidth(1200)
         }
     }
 
@@ -91,10 +93,11 @@ struct PlayersView: View {
                                          previewPhoto: player.img)
                     } label: {
                         HStack(spacing: 10) {
-                            RemoteImage(urlString: player.img, width: 38, height: 38, cornerRadius: 6)
+                            RemoteImage(urlString: player.img, width: 56, height: 56,
+                                        cornerRadius: 10, contentMode: .fill)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(player.displayName)
-                                    .font(.body)
+                                    .font(.system(size: 17, weight: .medium))
                                 HStack(spacing: 4) {
                                     if let team = player.teamName { Text(team) }
                                     if let pos = player.position { Text(positionText(pos)) }
@@ -133,7 +136,20 @@ struct PlayersView: View {
 @MainActor
 @Observable
 final class PlayersModel {
-    private(set) var metricNames: [String] = []
+    /// 一项数据榜。key 用「维度.指标」而不是中文名 —— 不同维度存在同名指标
+    /// （例如 basic.ptsAvg 和 criticalMoment.ptsAvg 都叫「得分」），
+    /// 只按中文名做 key 会互相覆盖，导致某些标签只拿到 5 条数据。
+    struct Metric: Identifiable, Hashable {
+        let rankType: String     // basic.ptsAvg —— 也是单指标榜单接口的 rankType
+        let groupName: String    // 基础 / 进阶 / 关键时刻
+        let name: String         // 得分
+        var id: String { rankType }
+
+        /// 同名指标加上维度前缀，避免选择器里出现两个「得分」
+        var displayName: String { name }
+    }
+
+    private(set) var metrics: [Metric] = []
     private(set) var seasonOptions: [String] = []
     private(set) var rankRows: [PlayerRankRow] = []
     private(set) var searchResults: [SearchPlayer] = []
@@ -141,19 +157,31 @@ final class PlayersModel {
     private(set) var isSearching = false
     private(set) var errorMessage: String?
 
-    var query = "" { didSet { } }
-    var metricName = "" { didSet { loadRankRows() } }
+    var query = ""
+    var metricID = "" { didSet { loadRankRows() } }
     var season = "" { didSet { Task { await loadRank(season: season) } } }
+
+    /// 同名指标加维度前缀，选择器里不会出现两个「得分」
+    var pickerItems: [IdentifiedMetric] {
+        var seen: [String: Int] = [:]
+        return metrics.map { metric in
+            let count = (seen[metric.displayName] ?? 0)
+            seen[metric.displayName] = count + 1
+            let name = count == 0 ? metric.displayName
+                                  : "\(metric.displayName)（\(metric.groupName)）"
+            return IdentifiedMetric(id: metric.id, displayName: name)
+        }
+    }
 
     private let client = HupuClient.shared
     private var rankTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
-    private var rankCache: [String: [String: [PlayerRankRow]]] = [:]
-    private var fullRowsCache: [String: [PlayerRankRow]] = [:]
+    /// season -> rankType -> 前 5 名
+    private var topCache: [String: [String: [PlayerRankRow]]] = [:]
+    /// "season|rankType" -> 完整榜单
+    private var fullCache: [String: [PlayerRankRow]] = [:]
     private var fullTask: Task<Void, Never>?
     private(set) var isLoadingFull = false
-    /// 接口返回的指标顺序（基础指标在前，Dictionary 无序，必须单独保留）
-    private var metricOrder: [String] = []
 
     var currentRows: [PlayerRankRow] { rankRows }
 
@@ -171,9 +199,10 @@ final class PlayersModel {
         }
     }
 
+    private var currentMetric: Metric? { metrics.first { $0.id == metricID } }
+
     func start(force: Bool = false) async {
-        guard force || metricNames.isEmpty else { return }
-        // 先确定赛季，再用该赛季一次性拉回 32 项榜单（避免拿错赛季拿到空榜）
+        guard force || metrics.isEmpty else { return }
         let current = await SeasonProvider.shared.currentSeason()
         seasonOptions = [current, SeasonUtility.offset(current, by: -1), SeasonUtility.offset(current, by: -2)]
             .compactMap { $0 }
@@ -188,21 +217,26 @@ final class PlayersModel {
             let root: PlayerSeasonRankRoot? = try? await client.fetch(
                 .playerSeasonRank(season: targetSeason), ttl: HupuConfig.TTL.rank)
             guard !Task.isCancelled, let root else { return }
-            var map: [String: [PlayerRankRow]] = [:]
-            var ordered: [String] = []
-            for metric in root.metrics {
-                if let name = metric.chineseName, !name.isEmpty, map[name] == nil {
-                    map[name] = metric.rows
-                    ordered.append(name)
+
+            // 按维度顺序展开，每个指标用 engName 做唯一 key
+            var list: [Metric] = []
+            var top: [String: [PlayerRankRow]] = [:]
+            for group in root.dimensionList ?? [] {
+                for item in group.items {
+                    guard let rankType = item.engName, !rankType.isEmpty else { continue }
+                    top[rankType] = item.rows
+                    list.append(Metric(rankType: rankType,
+                                       groupName: group.chineseName ?? "",
+                                       name: item.chineseName ?? rankType))
                 }
             }
-            metricOrder = ordered
-            rankCache[targetSeason] = map
+            topCache[targetSeason] = top
             guard targetSeason == season else { return }
-            metricNames = ordered.filter { !(map[$0]?.isEmpty ?? true) }
-            if metricName.isEmpty || map[metricName] == nil {
-                metricName = metricNames.first(where: { $0 == "得分" })
-                    ?? metricNames.first
+
+            metrics = list
+            if !metrics.contains(where: { $0.id == metricID }) {
+                metricID = metrics.first(where: { $0.rankType == "basic.ptsAvg" })?.id
+                    ?? metrics.first?.id
                     ?? ""
             }
             loadRankRows()
@@ -211,88 +245,53 @@ final class PlayersModel {
         await rankTask?.value
     }
 
-    /// 切换赛季时按需取回该赛季的 32 项榜单
     private func loadRank(season targetSeason: String) async {
-        if rankCache[targetSeason] == nil {
+        if topCache[targetSeason] == nil {
             await fetchRankPayload(season: targetSeason)
             return
         }
-        metricNames = metricOrder.filter { !(rankCache[targetSeason]?[$0]?.isEmpty ?? true) }
-        if metricName.isEmpty || rankCache[targetSeason]?[metricName] == nil {
-            metricName = metricNames.first ?? ""
+        if !metrics.contains(where: { $0.id == metricID }) {
+            metricID = metrics.first?.id ?? ""
         }
         loadRankRows()
     }
 
     private func loadRankRows() {
-        rankRows = rankCache[season]?[metricName] ?? []
+        guard let metric = currentMetric else { rankRows = []; return }
+        rankRows = topCache[season]?[metric.rankType] ?? []
         Task { await fetchFullRowsIfNeeded() }
     }
 
-    /// playerSeasonRank 每项只给前 5 名；选中某项时再用单指标榜单接口取完整 30 强（每页 20，翻 2 页）
+    /// playerSeasonRank 每项只给前 5 名；选中某项时改用单指标榜单接口翻页取完整榜单。
+    /// 接口不返回总条数，只能一直翻到某页不足 20 条为止。
     private func fetchFullRowsIfNeeded() async {
-        guard let rankType = Self.rankType(for: metricName) else { return }
-        let key = "\(season)|\(metricName)"
-        guard fullRowsCache[key] == nil, rankRows.count < 30 else { return }
+        guard let metric = currentMetric else { return }
+        let key = "\(season)|\(metric.rankType)"
+        guard fullCache[key] == nil, rankRows.count < 30 else { return }
 
         fullTask?.cancel()
         fullTask = Task {
             var rows: [PlayerRankRow] = []
-            for page in 1...2 {
+            var page = 1
+            // 上限 60 页（1200 人）防御异常分页，正常 2-3 页就到头了
+            while page <= 60 {
                 let result: RankMetric? = try? await client.fetch(
-                    .playerSingleDimensionRank(rankType: rankType, season: season, page: page),
+                    .playerSingleDimensionRank(rankType: metric.rankType, season: season, page: page),
                     ttl: HupuConfig.TTL.rank)
-                rows.append(contentsOf: result?.rows ?? [])
-                if (result?.rows.count ?? 0) < 20 { break }
+                let batch = result?.rows ?? []
+                rows.append(contentsOf: batch)
+                if batch.count < 20 { break }
+                page += 1
             }
             guard !Task.isCancelled else { return }
-            fullRowsCache[key] = rows
-            guard metricName == Self.metricNameFor(rankType: rankType), season == self.season else { return }
+            fullCache[key] = rows
+            // 只在用户仍停留在这项指标时才覆盖，避免快速切换时写入错乱的榜单
+            guard metric.id == metricID, season == self.season else { return }
             rankRows = rows
             isLoadingFull = false
         }
         isLoadingFull = true
         await fullTask?.value
-    }
-
-    /// 指标中文名 ↔ rankType（playerSeasonRank 的 engName 形如 basic.ptsAvg）
-    static func rankType(for metricName: String) -> String? {
-        switch metricName {
-        case "得分": return "basic.ptsAvg"
-        case "篮板": return "basic.rebAvg"
-        case "助攻": return "basic.astAvg"
-        case "抢断": return "basic.stlAvg"
-        case "盖帽": return "basic.blkAvg"
-        case "前场篮板": return "basic.orebAvg"
-        case "后场篮板": return "basic.drebAvg"
-        case "失误": return "basic.toAvg"
-        case "上场时间": return "basic.minAvg"
-        case "投篮命中率": return "basic.fgp"
-        case "三分命中率": return "basic.tpp"
-        case "罚球命中率": return "basic.ftp"
-        case "两双": return "basic.dd"
-        case "三双": return "basic.td"
-        case "两分命中率": return "basic.twoPointsFgp"
-        default: return nil
-        }
-    }
-
-    static func metricNameFor(rankType: String) -> String? {
-        switch rankType {
-        case "basic.ptsAvg": return "得分"
-        case "basic.rebAvg": return "篮板"
-        case "basic.astAvg": return "助攻"
-        case "basic.stlAvg": return "抢断"
-        case "basic.blkAvg": return "盖帽"
-        case "basic.orebAvg": return "前场篮板"
-        case "basic.drebAvg": return "后场篮板"
-        case "basic.toAvg": return "失误"
-        case "basic.minAvg": return "上场时间"
-        case "basic.fgp": return "投篮命中率"
-        case "basic.tpp": return "三分命中率"
-        case "basic.ftp": return "罚球命中率"
-        default: return nil
-        }
     }
 
     func search(_ text: String) async {
@@ -314,5 +313,4 @@ final class PlayersModel {
         }
         await searchTask?.value
     }
-
 }

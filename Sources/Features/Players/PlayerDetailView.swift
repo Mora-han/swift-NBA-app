@@ -53,7 +53,7 @@ struct PlayerDetailView: View {
                 }
             }
             .padding(.vertical, 12)
-            .readableWidth(820)
+            .pageWidth(1200)
         }
         .pageBackground()
         .navigationTitle(model.info?.name ?? previewName ?? "球员")
@@ -105,10 +105,10 @@ struct PlayerDetailView: View {
             if let contract = info.contractDetails, !contract.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("合同")
-                        .font(.caption)
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                     Text(contract)
-                        .font(.caption)
+                        .font(.system(size: 14))
                         .textSelection(.enabled)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,20 +129,20 @@ struct PlayerDetailView: View {
 
     /// 头像 + 姓名区（横向/纵向两种布局复用）
     private func infoHeader(_ info: PlayerInfo) -> some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 20) {
             RemoteImage(urlString: info.big_photo ?? info.photo,
-                        width: 96, height: 96, cornerRadius: 12, contentMode: .fill)
+                        width: 132, height: 132, cornerRadius: 16, contentMode: .fill)
             VStack(alignment: .leading, spacing: 6) {
                 Text(info.name ?? "")
-                    .font(.title2.weight(.bold))
+                    .font(.system(size: 26, weight: .bold))
                 if let eng = info.eng_name {
                     Text(eng)
-                        .font(.subheadline)
+                        .font(.system(size: 16))
                         .foregroundStyle(.secondary)
                 }
                 if let nick = info.nick, !nick.isEmpty {
                     Text("「\(nick)」")
-                        .font(.caption)
+                        .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 10) {
@@ -157,9 +157,9 @@ struct PlayerDetailView: View {
 
     private func statChip(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .font(.system(size: 14, weight: .medium))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .background(.quaternary, in: .capsule)
     }
 
@@ -210,7 +210,7 @@ struct PlayerDetailView: View {
                                           title: metric.cnName ?? metric.name ?? "",
                                           value: metric.quota?.raw ?? "-",
                                           rank: metric.rank)
-                        }, columns: 4)
+                        })
                     }
                     .systemCard()
                 }
@@ -234,7 +234,7 @@ struct PlayerDetailView: View {
                     StatGrid(items: model.careerStats.map {
                         StatGrid.Item(id: $0.id, title: $0.cnName ?? $0.name ?? "",
                                       value: $0.quota?.raw ?? "-", rank: $0.rank)
-                    }, columns: 4)
+                    })
                 }
                 .systemCard()
 
@@ -244,7 +244,7 @@ struct PlayerDetailView: View {
                         StatGrid(items: model.careerMax.map {
                             StatGrid.Item(id: $0.id, title: $0.cnName ?? $0.name ?? "",
                                           value: $0.quota?.raw ?? "-", rank: nil)
-                        }, columns: 4)
+                        })
                     }
                     .systemCard()
                 }
@@ -315,11 +315,11 @@ struct PlayerDetailView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text(award.awardDesc ?? "")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.orange)
                             Spacer()
                             Text("\(award.details.count) 次")
-                                .font(.caption)
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                         }
                         Text(award.details.prefix(12).map { detail in
@@ -327,7 +327,7 @@ struct PlayerDetailView: View {
                                 .compactMap { $0 }
                                 .joined(separator: " ")
                         }.filter { !$0.isEmpty }.joined(separator: "、"))
-                            .font(.caption)
+                            .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }

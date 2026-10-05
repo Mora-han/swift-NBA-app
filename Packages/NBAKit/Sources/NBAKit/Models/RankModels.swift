@@ -47,6 +47,34 @@ public struct PlayerRankRow: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { playerId ?? "\(playerName ?? "")-\(rank ?? 0)" }
 }
 
+// MARK: - 历史总数据榜（生涯累计，非赛季榜）
+
+/// `playerAllDimensionCareerRank?grain=totals` —— 23 项生涯总指标菜单（每项前 5 名）。
+/// `grain` 只接受 perGame / totals，totals 才是总得分/总助攻这类累计榜。
+public struct CareerRankRoot: Decodable, Sendable {
+    public let dataDimensionMap: [String: [CareerRankDimension]]?
+
+    /// REGULAR 阶段的指标列表（菜单 + 每项前 5 名）
+    public var metrics: [RankMetric] {
+        (dataDimensionMap?["REGULAR"] ?? []).flatMap { $0.items }
+    }
+}
+
+public struct CareerRankDimension: Decodable, Sendable {
+    public let name: String?          // "all"
+    public let itemList: [RankMetric]?
+
+    public var items: [RankMetric] { itemList ?? [] }
+}
+
+/// `singleDimensionPlayerCareerRank` —— 单指标生涯总榜翻页（20 条/页，无 season/playerType 参数）。
+/// 注意与赛季版 `playerSingleDimensionSeasonRank` 是两个不同接口。
+public struct CareerRankPageRoot: Decodable, Sendable {
+    public let dataDimension: RankMetric?
+
+    public var rows: [PlayerRankRow] { dataDimension?.rows ?? [] }
+}
+
 // MARK: - 历史选秀（1970-2026）
 
 public struct DraftRoot: Decodable, Sendable {
@@ -103,6 +131,15 @@ public struct AwardCategory: Decodable, Sendable, Identifiable {
     /// 去重后的得主人数（同一球员多赛季获奖只算一次）
     public var winnerCount: Int {
         Set(winners.compactMap(\.playerId)).count
+    }
+
+    /// 用指定的得主列表生成同类奖项（用于按赛季本地过滤）。
+    /// 注意：`allPlayerAwardList` 接口忽略 season 参数，始终返回最近 5 个赛季，
+    /// 因此必须拿到全量后在本地按 `winner.season` 过滤。
+    public func filtering(winners: [AwardWinner]) -> AwardCategory {
+        AwardCategory(awardName: awardName,
+                      awardDesc: awardDesc,
+                      playerAwardDetailDTOList: winners)
     }
 }
 

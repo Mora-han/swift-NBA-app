@@ -4,6 +4,9 @@ import Foundation
 public enum HupuConfig {
     /// 主力网关（国内阿里云，实测 TTFB 中位 80ms）
     public static let baseURL = URL(string: "https://games.mobileapi.hupu.com")!
+    /// 帖子里层页（新闻正文页）。basketballapi 没有新闻正文接口，
+    /// 正文只在 SSR 页面的 __NEXT_DATA__ 里，因此单独走这个域名。
+    public static let threadBaseURL = URL(string: "https://m.hupu.com")!
     /// 版本路径仅作路由用，实测 1/7.5.25 ~ 1/8.2.10 各版本返回一致，可随时降级替换
     public static let versionPath = "3/7.5.60"
     /// 必须带正常 iPhone UA，裸 UA 可能被拦
@@ -22,6 +25,11 @@ public enum HupuConfig {
         public static let rank: TimeInterval = 300
         public static let roster: TimeInterval = 600
         public static let encyclopedia: TimeInterval = 6 * 3600
+        public static let news: TimeInterval = 120
+        /// 实时新闻流：只放几十秒，轮询才能真正拿到新内容
+        public static let newsLive: TimeInterval = 20
+        /// 帖子正文基本不会改，缓存久一点
+        public static let thread: TimeInterval = 3600
     }
 }
 
@@ -111,6 +119,15 @@ public enum HupuEndpoint: Sendable, Hashable {
     case draft(year: String)
     case allPlayerAwardList(season: String)
 
+    // 历史总数据榜（生涯累计，非赛季榜）
+    case careerTotalRankMenu                     // 23 项生涯总指标菜单（每项前 5 名）
+    case careerTotalRank(rankType: String, page: Int) // 单指标生涯总榜翻页（20 条/页）
+
+    // 新闻（虎扑 NBA 板块）
+    case newsList(cursor: String?)               // 分页走 newsId 游标，用于往回翻历史
+    case newsSite                                // 实时流：固定 100 条、覆盖近数小时、最新 1~2 分钟
+    case threadPage(tid: String)                 // 新闻正文页（SSR，正文在 __NEXT_DATA__）
+
     var path: String {
         let v = "/\(HupuConfig.versionPath)/basketballapi"
         switch self {
@@ -143,6 +160,19 @@ public enum HupuEndpoint: Sendable, Hashable {
         case .draftYears: return "\(v)/draftYearConfig"
         case .draft: return "\(v)/players/draft"
         case .allPlayerAwardList: return "\(v)/allPlayerAwardList"
+        case .careerTotalRankMenu: return "\(v)/playerAllDimensionCareerRank"
+        case .careerTotalRank: return "\(v)/singleDimensionPlayerCareerRank"
+        case .newsList: return "\(v)/news/v2/newsList"
+        case .newsSite: return "\(v)/news/v2/MSite"
+        case .threadPage(let tid): return "bbs/\(tid).html"
+        }
+    }
+
+    /// 绝大多数接口走 basketballapi 网关，帖子页是另一个域名
+    var baseURL: URL {
+        switch self {
+        case .threadPage: return HupuConfig.threadBaseURL
+        default: return HupuConfig.baseURL
         }
     }
 
@@ -262,6 +292,36 @@ public enum HupuEndpoint: Sendable, Hashable {
             return [URLQueryItem(name: "leagueType", value: "NBA"),
                     URLQueryItem(name: "competitionType", value: "NBA"),
                     URLQueryItem(name: "season", value: season)]
+        case .careerTotalRankMenu:
+            // grain 只有 perGame / totals 两个合法值（其余全部 invalid grain）；
+            // totals 才是「总得分/总助攻」这类生涯累计榜。
+            return [URLQueryItem(name: "competitionStage", value: "REGULAR"),
+                    URLQueryItem(name: "grain", value: "totals"),
+                    URLQueryItem(name: "competitionType", value: "NBA"),
+                    URLQueryItem(name: "competitionLeagueType", value: "NBA"),
+                    URLQueryItem(name: "leagueType", value: "NBA")]
+        case .careerTotalRank(let rankType, let page):
+            // 接口名与赛季版 playerSingleDimensionSeasonRank 不同，参数也没有 season/playerType
+            return [URLQueryItem(name: "competitionLeagueType", value: "NBA"),
+                    URLQueryItem(name: "competitionType", value: "NBA"),
+                    URLQueryItem(name: "competitionStageType", value: "REGULAR"),
+                    URLQueryItem(name: "rankType", value: rankType),
+                    URLQueryItem(name: "pageNo", value: String(page))]
+        case .newsList(let cursor):
+            // preCount 必填但实测固定返回 20 条/页；翻页用 newsId=上一页最后一条 nid
+            var q = [URLQueryItem(name: "tagCode", value: "nba"),
+                     URLQueryItem(name: "cateGoryCode", value: "basketball"),
+                     URLQueryItem(name: "preCount", value: "20")]
+            if let cursor, !cursor.isEmpty {
+                q.append(URLQueryItem(name: "newsId", value: cursor))
+            }
+            return q
+        case .newsSite:
+            // 该接口不接受翻页/条数参数，固定返回 100 条
+            return [URLQueryItem(name: "tagCode", value: "nba"),
+                    URLQueryItem(name: "cateGoryCode", value: "basketball")]
+        case .threadPage:
+            return []
         }
     }
 

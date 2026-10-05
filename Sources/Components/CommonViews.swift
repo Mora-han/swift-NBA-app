@@ -16,7 +16,9 @@ struct TeamBadge: View {
 
 // MARK: - 数据指标网格（球员/球队详情共用）
 
-/// 2-4 列自适应网格，展示「指标名 / 数值 / 联盟排名」
+/// 自适应列数网格，展示「指标名 / 数值 / 联盟排名」。
+/// 用 `GridItem.adaptive` 让列数随容器宽度自动增减：宽屏一行放更多格子，
+/// 而不是把单元格里的字无限撑大。高度由内容决定，无需手算。
 struct StatGrid: View {
     struct Item: Identifiable {
         let id: String
@@ -27,38 +29,42 @@ struct StatGrid: View {
     }
 
     let items: [Item]
-    var columns: Int = 4
+    /// 单格最小宽度（约等于「联盟第 12」这类副文案不折行所需的宽度）
+    var minimumCellWidth: CGFloat = 92
+    var maximumCellWidth: CGFloat = 220
 
     var body: some View {
         LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns),
+            columns: [GridItem(.adaptive(minimum: minimumCellWidth, maximum: maximumCellWidth),
+                               spacing: 8)],
             spacing: 8
         ) {
             ForEach(items) { item in
-                VStack(spacing: 3) {
-                    Text(item.title)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text(item.value.isEmpty ? "—" : item.value)
-                        .font(.statNumber(17, weight: .semibold))
-                        .foregroundStyle(item.value.isEmpty ? .secondary : item.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    if let rank = item.rank {
-                        Text("联盟第 \(rank)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        Text(" ").font(.system(size: 9))
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: Theme.tileRadius))
+                cell(item)
             }
         }
+    }
+
+    private func cell(_ item: StatGrid.Item) -> some View {
+        VStack(spacing: 3) {
+            Text(item.title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(item.value.isEmpty ? "—" : item.value)
+                .font(.statNumber(20, weight: .semibold))
+                .foregroundStyle(item.value.isEmpty ? .secondary : item.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(item.rank.map { "联盟第 \($0)" } ?? " ")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: Theme.tileRadius))
     }
 }
 
@@ -84,7 +90,8 @@ struct InfoRow: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.subheadline)
+        .font(.system(size: 15))
+        .padding(.vertical, 3)
     }
 }
 
@@ -94,12 +101,12 @@ struct SectionHeader: View {
     var subtitle: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.headline)
+                .font(.system(size: 18, weight: .semibold))
             if let subtitle {
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
         }
@@ -128,11 +135,11 @@ struct StreakBadge: View {
         if let s = streak, let value = Int(s), value != 0 {
             let winning = value > 0
             Text("\(winning ? "" : "-")\(abs(value))")
-                .font(.statNumber(10, weight: .bold))
+                .font(.statNumber(11, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(minWidth: 20)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 4)
+                .frame(minWidth: 22)
+                .padding(.vertical, 3)
+                .padding(.horizontal, 5)
                 .background(winning ? Theme.win : Theme.loss, in: .capsule)
         }
     }
@@ -235,12 +242,12 @@ struct MetricPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: systemImage)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 15, weight: .medium))
             }
             .padding(.horizontal, 4)
 
@@ -251,14 +258,13 @@ struct MetricPicker: View {
                             withAnimation(.snappy(duration: 0.22)) { selection = item }
                         } label: {
                             Text(item)
-                                .font(.subheadline)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(
-                                    item == selection ? Color.accentColor : Color(.tertiarySystemFill),
-                                    in: .capsule
-                                )
-                                .foregroundStyle(item == selection ? Color.white : Color.primary)
+                                .font(.system(size: 15))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(selection == item ? AnyShapeStyle(Color.accentColor)
+                                            : AnyShapeStyle(.quaternary),
+                                            in: .capsule)
+                                .foregroundStyle(selection == item ? Color.white : Color.primary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -271,6 +277,33 @@ struct MetricPicker: View {
     }
 }
 
+/// 指标可能重名（如多个维度都有「得分」），因此用稳定 id 选择、展示名只用于文字。
+struct IdMetricPicker: View {
+    let title: String
+    let items: [IdentifiedMetric]
+    @Binding var selectionID: String
+    var systemImage: String = "chart.bar.fill"
+
+    var body: some View {
+        MetricPicker(title: title,
+                     items: items.map(\.displayName),
+                     selection: Binding(get: {
+                         items.first { $0.id == selectionID }?.displayName ?? selectionID
+                     }, set: { newValue in
+                         if let hit = items.first(where: { $0.displayName == newValue }) {
+                             selectionID = hit.id
+                         }
+                     }),
+                     systemImage: systemImage)
+    }
+}
+
+struct IdentifiedMetric: Identifiable, Hashable {
+    let id: String
+    let displayName: String
+}
+
+
 // MARK: - 赛季选择
 
 struct SeasonPicker: View {
@@ -282,5 +315,6 @@ struct SeasonPicker: View {
             ForEach(seasons, id: \.self) { Text($0).tag($0) }
         }
         .pickerStyle(.menu)
+        .font(.system(size: 15))
     }
 }

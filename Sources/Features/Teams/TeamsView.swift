@@ -22,7 +22,7 @@ struct TeamsView: View {
         search.isEmpty ? west : west.filter { $0.name.contains(search) || ($0.abbr ?? "").contains(search) }
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 168), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 240), spacing: 14)]
 
     var body: some View {
         NavigationStack {
@@ -41,9 +41,10 @@ struct TeamsView: View {
                 }
                 .padding(.horizontal, Theme.gutter)
                 .padding(.vertical, 12)
-                .readableWidth(1000)
+                .pageWidth(1400)
             }
             .navigationTitle("球队")
+            .inlineNavigationTitle()
             .searchable(text: $search, prompt: "搜索球队")
         }
         .task { await store.load() }
@@ -52,14 +53,12 @@ struct TeamsView: View {
     private func conferenceGrid(title: String, teams: [LeagueTeam]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: title, subtitle: "\(teams.count) 支球队")
-            LazyVGrid(columns: columns, spacing: 12) {
+            LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(teams) { team in
                     NavigationLink {
                         TeamDetailView(teamId: team.teamId, preview: team)
                     } label: {
-                        TeamCard(team: team,
-                                  logo: store.logo(for: team.teamId),
-                                  standing: store.standing(for: team.teamId))
+                        TeamCard(team: team, logo: store.logo(for: team.teamId))
                     }
                     .buttonStyle(.plain)
                 }
@@ -68,58 +67,31 @@ struct TeamsView: View {
     }
 }
 
-/// 球队卡片：队徽 + 名称 + 战绩
+/// 球队卡片：只保留队徽与队名（战绩/排名在「战绩」页呈现，这里不重复）
 struct TeamCard: View {
     let team: LeagueTeam
     var logo: String?
-    var standing: TeamStanding?
 
     var body: some View {
-        VStack(spacing: 10) {
-            RemoteImage(urlString: logo, width: 56, height: 56)
+        VStack(spacing: 12) {
+            RemoteImage(urlString: logo, width: 72, height: 72)
 
-            VStack(spacing: 2) {
-                Text(team.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let abbr = team.abbr {
-                    Text(abbr)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text(team.name)
+                .font(.system(size: 18, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
-            if let st = standing {
-                HStack(spacing: 8) {
-                    Text("#\(st.rank ?? 0)")
-                        .font(.statNumber(13, weight: .bold))
-                        .foregroundStyle(rank > 0 && rank <= 8 ? .orange : .secondary)
-                    Text(st.record)
-                        .font(.statNumber(14, weight: .semibold))
-                        .monospacedDigit()
-                    if let rate = st.winRate?.raw, !rate.isEmpty {
-                        Text(rate)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Spacer(minLength: 0)
-                    StreakBadge(streak: st.strk?.raw)
-                }
-                .padding(.top, 2)
-            } else {
-                Text("—")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            if let abbr = team.abbr {
+                Text(abbr)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 22)
+        .padding(.horizontal, 12)
         .cardSurface()
     }
-
-    private var rank: Int { standing?.rank ?? 0 }
 }
 
 // MARK: - 球队详情
@@ -167,6 +139,7 @@ struct TeamDetailView: View {
 
                 if !model.historyStages.isEmpty {
                     historySection(model.historyStages)
+                    seasonRecordsSection
                 }
             }
             .padding(.horizontal, Theme.gutter)
@@ -176,7 +149,7 @@ struct TeamDetailView: View {
         .navigationTitle(model.info?.name ?? preview?.name ?? "球队")
         .inlineNavigationTitle()
         .task { await model.start() }
-        .refreshable { await model.load(force: true) }
+        .refreshable { await model.refreshAll() }
     }
 
     private func header(_ info: TeamBasicInfo) -> some View {
@@ -230,7 +203,7 @@ struct TeamDetailView: View {
                               title: metric.cnName ?? metric.name ?? "",
                               value: metric.quota?.raw ?? "-",
                               rank: metric.rank)
-            }, columns: 4)
+            })
         }
         .systemCard()
     }
@@ -251,7 +224,7 @@ struct TeamDetailView: View {
                     .buttonStyle(.plain)
 
                     if index < model.roster.count - 1 {
-                        Divider().padding(.leading, 60)
+                        Divider().padding(.vertical, 1)
                     }
                 }
             }
@@ -323,6 +296,68 @@ struct TeamDetailView: View {
         .systemCard()
     }
 
+    /// 球队历史战绩：逐赛季回看该队的分区排名与胜负场次
+    private var seasonRecordsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "历史战绩",
+                          subtitle: "\(model.recordSeasons.count) 个赛季")
+
+            if model.recordsLoading && model.records.isEmpty {
+                LoadingBlock()
+            } else if model.records.isEmpty {
+                EmptyBlock(title: "暂无历史战绩",
+                           message: "虎扑战绩数据自 2004-05 赛季起")
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(model.records.enumerated()), id: \.element.season) { index, record in
+                        HStack(spacing: 10) {
+                            Text(record.season)
+                                .font(.system(size: 15, weight: .medium))
+                                .monospacedDigit()
+                                .frame(width: 92, alignment: .leading)
+
+                            Text(record.conference)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(record.isEast ? Color.accentColor : .orange, in: .capsule)
+                                .frame(width: 52, alignment: .leading)
+
+                            Text("第 \(record.rank) 名")
+                                .font(.statNumber(15, weight: .semibold))
+                                .foregroundStyle(record.rank > 0 && record.rank <= 8 ? .orange : .secondary)
+                                .frame(width: 68, alignment: .leading)
+
+                            Spacer(minLength: 8)
+
+                            Text(record.record.isEmpty ? "-" : record.record)
+                                .font(.statNumber(16, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+
+                            if let rate = record.winRate, !rate.isEmpty {
+                                Text(rate)
+                                    .font(.statNumber(13))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 54, alignment: .trailing)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+
+                        if index < model.records.count - 1 {
+                            Divider().padding(.leading, 14)
+                        }
+                    }
+                }
+                .cardSurface()
+            }
+        }
+        .systemCard()
+    }
+
     private func historySection(_ stages: [HistoryStage]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "队史纪录保持者", subtitle: "队史各数据榜首")
@@ -373,58 +408,76 @@ private struct RosterRow: View {
     let player: RosterPlayer
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(player.number ?? "")
-                .font(.statNumber(13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .trailing)
+        VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Text(player.number ?? "")
+                    .font(.statNumber(18, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 34, alignment: .trailing)
 
-            RemoteImage(urlString: player.player_header, width: 34, height: 34, cornerRadius: 6)
+                RemoteImage(urlString: player.player_header_big ?? player.player_header,
+                            width: 62, height: 62, cornerRadius: 10, contentMode: .fill)
 
-            VStack(alignment: .leading, spacing: 1) {
-                nameLine
-                statLine
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(player.player_name ?? "")
+                            .font(.system(size: 19, weight: .semibold))
+                            .lineLimit(1)
+                        if player.isInjured {
+                            Image(systemName: "cross.case.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.loss)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        if let pos = player.position, !pos.isEmpty {
+                            Text(pos)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let mins = player.min?.raw, !mins.isEmpty {
+                            Text("均 \(mins) 分钟")
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
+                if let salary = player.salary_str?.raw, !salary.isEmpty {
+                    Text(salary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Spacer(minLength: 6)
-
-            if let salary = player.salary_str?.raw, !salary.isEmpty {
-                Text(salary)
-                    .font(.statNumber(11))
-                    .foregroundStyle(.secondary)
+            // 得分 / 篮板 / 助攻 三个核心数据放大成独立格子
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
+                statTile("得分", player.pts?.raw, .primary)
+                statTile("篮板", player.reb?.raw, .primary)
+                statTile("助攻", player.asts?.raw, .primary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(12)
         .contentShape(.rect)
     }
 
-    private var nameLine: some View {
-        HStack(spacing: 4) {
-            Text(player.player_name ?? "")
-                .font(.subheadline.weight(.medium))
+    private func statTile(_ title: String, _ value: String?, _ accent: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Text((value?.isEmpty == false) ? value! : "—")
+                .font(.statNumber(20, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(accent)
                 .lineLimit(1)
-            if player.isInjured {
-                Image(systemName: "cross.case.fill")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.loss)
-            }
         }
-    }
-
-    private var statLine: some View {
-        HStack(spacing: 6) {
-            if let pos = player.position {
-                Text(pos)
-            }
-            Text("均 " + (player.min?.raw ?? "-") + " 分")
-            Text((player.pts?.raw ?? "-") + " 分")
-            Text((player.reb?.raw ?? "-") + " 板")
-            Text((player.asts?.raw ?? "-") + " 助")
-        }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(Theme.raisedBackground.opacity(0.65), in: .rect(cornerRadius: Theme.tileRadius))
     }
 }
 
@@ -465,6 +518,10 @@ final class TeamDetailModel {
     private(set) var historyStages: [HistoryStage] = []
     private(set) var errorMessage: String?
 
+    private(set) var records: [TeamSeasonRecord] = []
+    private(set) var recordsLoading = false
+    private(set) var recordSeasons: [String] = []
+
     private let teamId: String
     private let client = HupuClient.shared
 
@@ -474,6 +531,49 @@ final class TeamDetailModel {
 
     func start() async {
         if info == nil { await load() }
+        await loadRecords()
+    }
+
+    func refreshAll() async {
+        records = []
+        await load()
+        await loadRecords()
+    }
+
+    /// 历史战绩：逐赛季请求战绩接口，从响应里挑出当前这支球队。
+    /// 虎扑战绩接口最早只到 2004-05 赛季，更早的赛季返回空。
+    private func loadRecords() async {
+        guard records.isEmpty else { return }
+        let current = await SeasonProvider.shared.currentSeason()
+        let seasons = (0..<22).compactMap { SeasonUtility.offset(current, by: -$0) }
+        guard !seasons.isEmpty else { return }
+        recordSeasons = seasons
+
+        recordsLoading = true
+        defer { recordsLoading = false }
+
+        var found: [TeamSeasonRecord] = []
+        for season in seasons {
+            let root: StandingRoot? = try? await client.fetch(
+                .teamStanding(stage: "REGULAR", season: season), ttl: HupuConfig.TTL.standings)
+            if let record = Self.record(for: teamId, in: root, season: season) {
+                found.append(record)
+            }
+        }
+        records = found
+    }
+
+    private static func record(for teamId: String, in root: StandingRoot?, season: String) -> TeamSeasonRecord? {
+        guard let root else { return nil }
+        let east = root.east.contains { $0.teamId == teamId }
+        let row = (east ? root.east : root.west).first { $0.teamId == teamId }
+        guard let row, (row.won ?? 0) + (row.lost ?? 0) > 0 else { return nil }
+        return TeamSeasonRecord(season: season,
+                                conference: east ? "东部" : "西部",
+                                isEast: east,
+                                rank: row.rank ?? 0,
+                                record: "\(row.won ?? 0)-\(row.lost ?? 0)",
+                                winRate: row.winRate?.raw)
     }
 
     func load(force: Bool = false) async {
@@ -509,4 +609,13 @@ final class TeamDetailModel {
         historyStages = h?.stages ?? []
         seasonStats = s
     }
+}
+/// 球队某一赛季的常规赛战绩
+struct TeamSeasonRecord: Hashable {
+    let season: String        // "2023-2024"
+    let conference: String    // 东部 / 西部
+    let isEast: Bool
+    let rank: Int
+    let record: String        // "48-34"
+    let winRate: String?      // "58.5%"
 }
